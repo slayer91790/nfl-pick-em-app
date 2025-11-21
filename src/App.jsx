@@ -4,35 +4,39 @@ import { doc, setDoc, collection, getDocs, updateDoc, deleteField, getDoc, array
 import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
-// 🔒 CONFIG
+// 🔒 CONFIG & SEED DATA
 // ==========================================
-const ALLOWED_EMAILS = [
+
+// Only these people see the "👑 Admin" Tab
+const ADMIN_EMAILS = [
+  "slayer91790@gmail.com", 
+  "antoniodanielvazquez@gmail.com"
+];
+
+// Fallback list for first-time setup
+const INITIAL_ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
   "antoniodanielvazquez@gmail.com",
   "crazynphat13@gmail.com",
   "friend1@example.com"
 ];
 
-// Admin Emails
-const ADMIN_EMAILS = [
-  "slayer91790@gmail.com", 
-  "antoniodanielvazquez@gmail.com"
-];
-
+// 📊 HISTORY (Weeks 3-11 Verified)
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
   { name: "Tony",         score: 83, rank: 2, wins: 1 },
-  { name: "Andy",         score: 79, rank: 3, wins: 1 },
-  { name: "Omar",         score: 77, rank: 4, wins: 1 },
-  { name: "Luis",         score: 77, rank: 4, wins: 0 },
+  { name: "Omar",         score: 83, rank: 2, wins: 1 },
+  { name: "Andy",         score: 79, rank: 4, wins: 1 },
+  { name: "Luis",         score: 77, rank: 5, wins: 0 },
   { name: "Art",          score: 76, rank: 6, wins: 0 },
   { name: "Roman",        score: 71, rank: 7, wins: 0 },
-  { name: "Tim",          score: 69, rank: 8, wins: 1 },
+  { name: "Tim",          score: 69, rank: 8, wins: 0 },
   { name: "Luis Solorio", score: 53, rank: 9, wins: 0 },
   { name: "Louis",        score: 34, rank: 10, wins: 0 }
 ];
 
 function App() {
+  // --- STATE ---
   const [user, setUser] = useState(null);
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
@@ -42,37 +46,51 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
   
-  // Guest List & Settings
+  // Settings & Admin State
   const [guestList, setGuestList] = useState([]);
+  const [nicknames, setNicknames] = useState({}); // Stores { "email_com": "Nickname" }
   const [newEmailInput, setNewEmailInput] = useState("");
+  const [newNicknameInput, setNewNicknameInput] = useState(""); // New Input
   const [picksVisible, setPicksVisible] = useState(false); 
 
+  // Audio
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
-  const musicPlayedRef = useRef(false); // <--- TRACKS IF MUSIC PLAYED THIS SESSION
+  const musicPlayedRef = useRef(false); // Tracks if music played this session
 
-  // 1. Load Config
+  // Helper: Firestore maps can't have dots in keys
+  const sanitizeEmail = (email) => email.replace(/\./g, '_');
+
+  // 1. Load Config (Guest List, Nicknames, Lock Status)
   useEffect(() => {
     const loadConfig = async () => {
       const configRef = doc(db, "config", "settings");
       const docSnap = await getDoc(configRef);
+      
       if (docSnap.exists()) {
         const data = docSnap.data();
         setGuestList(data.allowedEmails || []);
+        setNicknames(data.nicknames || {});
         setPicksVisible(data.picksVisible || false); 
       } else {
-        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], picksVisible: false });
-        setGuestList([...ALLOWED_EMAILS]);
+        // Seed Database on first run
+        await setDoc(configRef, { 
+          allowedEmails: [...INITIAL_ALLOWED_EMAILS], 
+          nicknames: {},
+          picksVisible: false 
+        });
+        setGuestList([...INITIAL_ALLOWED_EMAILS]);
       }
     };
     loadConfig();
   }, []);
 
-  // 2. Login Listener
+  // 2. Login Listener (With One-Time Music)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         const email = currentUser.email.toLowerCase();
+        // Check DB list OR Admin list
         const isAllowed = guestList.some(e => e.toLowerCase() === email) || ADMIN_EMAILS.some(e => e.toLowerCase() === email);
 
         if (isAllowed) {
@@ -80,12 +98,12 @@ function App() {
           setIsAdmin(ADMIN_EMAILS.some(e => e.toLowerCase() === email));
           fetchLeaderboard();
           
-          // --- PLAY MUSIC ONCE PER SESSION ---
+          // Play Music (Only Once)
           if (!musicPlayedRef.current) {
             try { 
               audioRef.current.volume = 0.5; 
-              audioRef.current.play().catch(() => {}); 
-              musicPlayedRef.current = true; // Mark as played
+              audioRef.current.play().catch(() => console.log("Audio blocked")); 
+              musicPlayedRef.current = true; 
             } catch (e) {}
           }
 
@@ -104,10 +122,12 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Games
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
         setGames(gamesData.events || []);
 
+        // News
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
@@ -116,18 +136,33 @@ function App() {
     fetchData();
   }, [currentWeek]);
 
+  // --- LOGIC: Similar Selections ---
+  const getSimilarSelections = () => {
+    if (!picks || Object.keys(picks).length === 0) return [];
+    return leaders
+      .filter(p => p.userId !== user.uid)
+      .map(player => {
+        const theirPicks = player[`week${currentWeek}`] || {};
+        let diff = 0;
+        games.forEach(g => {
+          if (picks[g.id] && theirPicks[g.id] && picks[g.id] !== theirPicks[g.id]) diff++;
+        });
+        return { name: player.userName, diff };
+      })
+      .sort((a, b) => a.diff - b.diff);
+  };
+
   // --- ACTIONS ---
   const handleLogin = () => signInWithGoogle();
   const handleLogout = () => { auth.signOut(); window.location.reload(); };
 
-  // --- FUNNY SOUND LOGIC ---
   const selectTeam = (gameId, teamAbbr, oddsString) => {
     setPicks((prev) => ({ ...prev, [gameId]: teamAbbr }));
     
-    // Play sound if picking a huge underdog (+8 or more)
+    // Funny Sound Logic: +8 Underdog or worse
     if (oddsString && oddsString.includes(teamAbbr) && oddsString.includes('+')) {
       const number = parseFloat(oddsString.replace(/[^0-9.]/g, ''));
-      if (number >= 8) { // <--- CHANGED TO 8
+      if (number >= 8) {
         try { funnyRef.current.currentTime = 0; funnyRef.current.play(); } catch(e) {}
       }
     }
@@ -136,7 +171,7 @@ function App() {
   const submitPicks = async () => {
     if (!user) return;
     if (Object.keys(picks).length < games.length) {
-      alert(`❌ You have only picked ${Object.keys(picks).length} of ${games.length} games. Finish them all!`);
+      alert(`❌ Incomplete! You picked ${Object.keys(picks).length} of ${games.length} games.`);
       return;
     }
     try {
@@ -169,16 +204,27 @@ function App() {
   const addGuest = async () => {
     if (!newEmailInput) return;
     const email = newEmailInput.toLowerCase().trim();
+    const nickname = newNicknameInput.trim();
     const configRef = doc(db, "config", "settings");
-    await updateDoc(configRef, { allowedEmails: arrayUnion(email) });
+    
+    // Update DB
+    await updateDoc(configRef, { 
+      allowedEmails: arrayUnion(email),
+      [`nicknames.${sanitizeEmail(email)}`]: nickname // Save nickname
+    });
+
+    // Update Local State
     setGuestList(prev => [...prev, email]);
+    setNicknames(prev => ({ ...prev, [sanitizeEmail(email)]: nickname }));
     setNewEmailInput("");
-    alert(`Added ${email}. You can tell them to login now!`); // <--- NO MORE EMAIL POPUP
+    setNewNicknameInput("");
+    alert(`✅ Added ${email} (${nickname || "No Nickname"})`);
   };
 
   const removeGuest = async (email) => {
     if (!window.confirm(`Remove ${email}?`)) return;
     const configRef = doc(db, "config", "settings");
+    // Note: We don't delete the nickname key to avoid complex update logic, just removing auth access
     await updateDoc(configRef, { allowedEmails: arrayRemove(email) });
     setGuestList(prev => prev.filter(e => e !== email));
   };
@@ -189,7 +235,7 @@ function App() {
   };
 
   const resetPicks = async (userId) => {
-    if (!window.confirm("Delete picks?")) return;
+    if (!window.confirm("Delete picks for this week?")) return;
     await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField() });
     fetchLeaderboard();
   };
@@ -225,7 +271,7 @@ function App() {
         </div>
       ) : (
         <>
-          {/* Nav Tabs */}
+          {/* Tabs */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '20px 0', flexWrap: 'wrap' }}>
             <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
             <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Make Picks</button>
@@ -244,7 +290,7 @@ function App() {
             {/* === DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                {/* Live Scores */}
+                {/* Scores */}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div>
                   <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
@@ -262,14 +308,19 @@ function App() {
                   </div>
                 </div>
 
-                {/* Pot & Leaderboard */}
+                {/* Leaderboard */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                    <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
                       <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${leaders.length * 10}</h2>
                       <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Week {currentWeek} Pool</p>
                       <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>Pay $10 to @MrDoom ↗</a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
+                   
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+                     <span>Leaderboard</span>
+                     <span>{picksVisible ? "🔓 OPEN" : "🔒 HIDDEN"}</span>
+                   </div>
+
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -286,16 +337,33 @@ function App() {
                    ))}
                 </div>
 
-                {/* Historical */}
+                {/* Similar Selections (If Visible) */}
+                {picksVisible && (
+                  <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
+                    <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>🔗 Similar Selections (Diffs)</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', padding: '15px', gap: '10px' }}>
+                      {getSimilarSelections().map((sim, i) => (
+                        <div key={i} style={{ backgroundColor: i === 0 ? '#28a745' : '#333', padding: '10px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%' }}>
+                          <span style={{ fontWeight: 'bold' }}>{sim.diff} Diff:</span> {sim.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Historical Stats */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📜 Season Standings (Weeks 1-11)</div>
+                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📜 Season Standings (Weeks 3-11)</div>
                   {PAST_STATS.map((stat, index) => (
                     <div key={index} style={{ padding: '15px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index === 0 ? '#FFD700' : '#444', color: index === 0 ? 'black' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{stat.rank}</div>
+                        <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: stat.rank === 1 ? '#FFD700' : '#444', color: stat.rank === 1 ? 'black' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{stat.rank}</div>
                         <div style={{ fontWeight: 'bold', color: 'white' }}>{stat.name}</div>
                       </div>
-                      <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div></div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div>
+                        {stat.wins > 0 && <div style={{ fontSize: '11px', color: '#FFD700' }}>🏆 {stat.wins} Wins</div>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -341,9 +409,7 @@ function App() {
                         <tr key={player.userId}>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', fontWeight: 'bold' }}>{player.userName}</td>
                           {games.map(g => (
-                            <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: playerPicks[g.id] ? '#28a745' : '#666' }}>
-                              {showPicks ? (playerPicks[g.id] || "-") : "🔒"}
-                            </td>
+                            <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: playerPicks[g.id] ? '#28a745' : '#666' }}>{showPicks ? (playerPicks[g.id] || "-") : "🔒"}</td>
                           ))}
                         </tr>
                       )
@@ -360,13 +426,42 @@ function App() {
                   <h3>⚙️ Game Control</h3>
                   <button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "🔒 HIDE PICKS" : "🔓 REVEAL PICKS"}</button>
                 </div>
+                
+                {/* GUEST LIST MANAGER WITH NICKNAMES */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>👥 Guest List</h3>
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                    <input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="friend@gmail.com" style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }} />
-                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer' }}>Add</button>
+                  <h3>👥 Manage Guest List</h3>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        <input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="Email (friend@gmail.com)" style={{ flex: 2, padding: '10px', borderRadius: '5px', border: 'none' }} />
+                        <input value={newNicknameInput} onChange={(e) => setNewNicknameInput(e.target.value)} placeholder="Nickname (Big Mike)" style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }} />
+                    </div>
+                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer', width: '100%' }}>Add Player</button>
                   </div>
-                  {guestList.map(email => <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginBottom: '5px' }}><span>{email}</span><button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>X</button></div>)}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    {guestList.map(email => (
+                        <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px' }}>
+                            <div>
+                                <span style={{color: 'white'}}>{email}</span>
+                                {nicknames[sanitizeEmail(email)] && <span style={{marginLeft: '10px', color: '#28a745', fontWeight:'bold'}}>({nicknames[sanitizeEmail(email)]})</span>}
+                            </div>
+                            <button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
+                        </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* PLAYER MANAGER */}
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>💰 Manage Players</h3>
+                  {leaders.map(player => (
+                    <div key={player.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #444' }}>
+                      <div style={{ fontWeight: 'bold' }}>{player.userName}</div>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button onClick={() => togglePaid(player.userId, player.paid)} style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: player.paid ? '#28a745' : '#555', color: 'white' }}>{player.paid ? "PAID ✅" : "Mark Paid"}</button>
+                        <button onClick={() => resetPicks(player.userId)} style={{ padding: '5px 10px', borderRadius: '5px', border: '1px solid #ff4444', cursor: 'pointer', backgroundColor: 'transparent', color: '#ff4444' }}>Reset Picks</button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
