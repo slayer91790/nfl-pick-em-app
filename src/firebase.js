@@ -5,12 +5,12 @@ import { getFirestore } from "firebase/firestore";
 
 // --- YOUR CONFIG (DO NOT CHANGE THIS PART) ---
 const firebaseConfig = {
-  apiKey: "AIzaSy...",            // Keep your existing key here
+  apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI",            // Keep your existing key here
   authDomain: "nfl-pick-em-2025.firebaseapp.com", // Ensure this matches your project
   projectId: "nfl-pick-em-2025",
   storageBucket: "nfl-pick-em-2025.firebasestorage.app",
-  messagingSenderId: "...",       // Keep your existing ID
-  appId: "..."                    // Keep your existing ID
+  messagingSenderId: "684455829730",       // Keep your existing ID
+  appId: "1:684455829730:web:f7960aed3eb38ff8f73ebb"                    // Keep your existing ID
 };
 
 // Initialize Firebase
