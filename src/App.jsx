@@ -4,7 +4,7 @@ import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
-// 🔒 CONFIG & DATA
+// 🔒 SECURITY SETTINGS
 // ==========================================
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
@@ -13,6 +13,9 @@ const ALLOWED_EMAILS = [
   "friend1@example.com"
 ];
 
+// ==========================================
+// 📊 HISTORY (WEEKS 1-11)
+// ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
   { name: "Tony",         score: 83, rank: 2, wins: 1 },
@@ -27,30 +30,36 @@ const PAST_STATS = [
 ];
 
 function App() {
+  // --- STATE ---
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true); // <--- NEW LOADING STATE
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(12);
-  const [hasPlayedIntro, setHasPlayedIntro] = useState(false); // Track if music played
 
-  // --- AUDIO SETUP ---
-  const introRef = useRef(new Audio('/intro.mp3'));
+  const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. Login Listener
+  // 1. Login Listener (With Loading Fix)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         if (ALLOWED_EMAILS.includes(currentUser.email)) {
           setUser(currentUser);
           fetchLeaderboard(); 
+          // Try audio
+          try {
+             audioRef.current.volume = 0.5;
+             audioRef.current.play().catch(() => {});
+          } catch (e) {}
         } else {
           alert("🚫 ACCESS DENIED: You are not on the guest list.");
           auth.signOut();
         }
       }
+      setLoading(false); // <--- STOP LOADING ONCE CHECK IS DONE
     });
     return () => unsubscribe();
   }, []);
@@ -72,27 +81,11 @@ function App() {
   const handleLogout = () => {
     auth.signOut();
     setUser(null);
-    window.location.reload(); // Force refresh to clear state
+    window.location.reload();
   };
 
-  // --- AUDIO TRIGGER (Fixes Autoplay Block) ---
-  const changeView = (newView) => {
-    setView(newView);
-    // Only play if we haven't played it yet
-    if (!hasPlayedIntro) {
-      try {
-        introRef.current.volume = 0.5;
-        introRef.current.play().catch(e => console.log("Audio blocked:", e));
-        setHasPlayedIntro(true);
-      } catch(e) {}
-    }
-  };
-
-  // --- SMART PICKS (Funny Sound) ---
   const selectTeam = (gameId, teamAbbr, oddsString) => {
     setPicks((prev) => ({ ...prev, [gameId]: teamAbbr }));
-
-    // Play sound if huge underdog (+9 or more)
     if (oddsString && oddsString.includes(teamAbbr) && oddsString.includes('+')) {
       const number = parseFloat(oddsString.replace(/[^0-9.]/g, ''));
       if (number >= 9) {
@@ -129,6 +122,29 @@ function App() {
     } catch (error) {}
   };
 
+  // ==========================================
+  // 🎨 RENDER
+  // ==========================================
+  
+  // --- 1. SHOW LOADING SCREEN IF CHECKING ID ---
+  if (loading) {
+    return (
+      <div style={{ 
+        height: '100vh', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: '#121212', 
+        color: 'white', 
+        flexDirection: 'column' 
+      }}>
+        <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
+        <h3>Verifying ID...</h3>
+      </div>
+    );
+  }
+
+  // --- 2. MAIN APP ---
   return (
     <div style={{ 
       fontFamily: 'Arial, sans-serif', 
@@ -141,7 +157,7 @@ function App() {
       backgroundAttachment: 'fixed'
     }}>
       
-      {/* Header with Logout */}
+      {/* Header */}
       <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
         {user && (
@@ -150,30 +166,27 @@ function App() {
               <span style={{ fontSize: '12px', color: '#ccc', display: 'none', sm: 'block' }}>{user.displayName}</span>
               <img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} />
             </div>
-            {/* LOGOUT BUTTON */}
-            <button 
-              onClick={handleLogout}
-              style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>
-              Logout
-            </button>
+            <button onClick={handleLogout} style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Logout</button>
           </div>
         )}
       </div>
 
+      {/* Login Screen */}
       {!user ? (
         <div style={{ textAlign: 'center', marginTop: '150px', padding: '20px' }}>
           <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏈</div>
           <h2 style={{ fontSize: '28px', marginBottom: '10px' }}>Private League</h2>
+          <p style={{ color: '#888', marginBottom: '40px' }}>Invitation Only • 2025 Season</p>
           <button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>
             Enter League
           </button>
         </div>
       ) : (
         <>
-          {/* Tabs (Triggers Audio) */}
+          {/* Nav Tabs */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
-            <button onClick={() => changeView('dashboard')} style={{ padding: '10px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'dashboard' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Dashboard</button>
-            <button onClick={() => changeView('picks')} style={{ padding: '10px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'picks' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Make Picks</button>
+            <button onClick={() => setView('dashboard')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'dashboard' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Dashboard</button>
+            <button onClick={() => setView('picks')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'picks' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Make Picks</button>
           </div>
 
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
@@ -217,7 +230,7 @@ function App() {
                         Pay $10 to @MrDoom ↗
                       </a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Current Week</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
