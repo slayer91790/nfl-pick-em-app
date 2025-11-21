@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { signInWithGoogle, db, auth } from './firebase';
 import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth'; // Import the listener
 
 // ==========================================
 // 🔒 SECURITY SETTINGS
 // ==========================================
 const ALLOWED_EMAILS = [
-  "slayer91790@gmail.com",  // <--- YOUR EMAIL
+  "slayer91790@gmail.com", 
   "antoniodanielvazquez@gmail.com",
   "crazynphat13@gmail.com",
-  "friend1@example.com" // Add any others here
+  "friend1@example.com"
 ];
 
 // ==========================================
-// 📊 HISTORY FROM YOUR SPREADSHEET (WEEKS 1-11)
+// 📊 HISTORY FROM YOUR SPREADSHEET
 // ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
@@ -29,7 +30,6 @@ const PAST_STATS = [
 ];
 
 function App() {
-  // --- STATE VARIABLES ---
   const [user, setUser] = useState(null);
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
@@ -37,10 +37,32 @@ function App() {
   const [leaders, setLeaders] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(12);
 
-  // Audio Player
   const audioRef = useRef(new Audio('/intro.mp3'));
 
-  // 1. Fetch NFL Schedule
+  // 1. Listen for Login Status (Works with Redirects)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        if (ALLOWED_EMAILS.includes(currentUser.email)) {
+          setUser(currentUser);
+          // Try to play audio on login success
+          try {
+             audioRef.current.volume = 0.5;
+             // Audio often needs a click first, but we try anyway
+             audioRef.current.play().catch(() => console.log("Audio blocked until click"));
+          } catch (e) {}
+        } else {
+          alert("🚫 ACCESS DENIED: You are not on the guest list.");
+          auth.signOut();
+        }
+      } else {
+        setUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Fetch NFL Schedule
   useEffect(() => {
     const fetchGames = async () => {
       try {
@@ -54,31 +76,17 @@ function App() {
     fetchGames();
   }, [currentWeek]);
 
-  // 2. Handle Login
-  const handleLogin = async () => {
-    const loggedInUser = await signInWithGoogle();
-    if (loggedInUser) {
-      if (ALLOWED_EMAILS.includes(loggedInUser.email)) {
-        setUser(loggedInUser);
-        try {
-          audioRef.current.volume = 0.5; 
-          audioRef.current.play();
-        } catch (e) {
-          console.log("Audio blocked by browser.");
-        }
-      } else {
-        alert("🚫 ACCESS DENIED: You are not on the guest list.");
-        auth.signOut();
-      }
-    }
+  // 3. Handle Login Button Click
+  const handleLogin = () => {
+    signInWithGoogle(); // This now redirects the page
   };
 
-  // 3. Handle Picks
+  // 4. Handle Picks
   const selectTeam = (gameId, teamAbbr) => {
     setPicks((prev) => ({ ...prev, [gameId]: teamAbbr }));
   };
 
-  // 4. Save Picks
+  // 5. Save Picks
   const submitPicks = async () => {
     if (!user) return;
     try {
@@ -86,7 +94,7 @@ function App() {
         userId: user.uid,
         userName: user.displayName,
         photo: user.photoURL,
-        paid: false, // Default to false, change in Firebase console manually
+        paid: false, 
         [`week${currentWeek}`]: picks,
         timestamp: new Date()
       }, { merge: true });
@@ -100,7 +108,7 @@ function App() {
     }
   };
 
-  // 5. Fetch Leaderboard
+  // 6. Fetch Leaderboard
   const fetchLeaderboard = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, "picks_2025"));
@@ -122,7 +130,16 @@ function App() {
   // 🎨 RENDER
   // ==========================================
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', backgroundColor: '#121212', minHeight: '100vh', color: 'white', paddingBottom: '80px' }}>
+    <div style={{ 
+      fontFamily: 'Arial, sans-serif', 
+      minHeight: '100vh', 
+      color: 'white', 
+      paddingBottom: '80px',
+      backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')",
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed'
+    }}>
       
       {/* Header */}
       <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
@@ -233,7 +250,7 @@ function App() {
             {view === 'leaderboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 
-                {/* --- SECTION 1: LIVE WEEK --- */}
+                {/* LIVE WEEK */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                    <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
                       <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${leaders.length * 10}</h2>
@@ -257,12 +274,9 @@ function App() {
                         </div>
                       </div>
                    ))}
-                   {leaders.length === 0 && (
-                     <div style={{ padding: '30px', textAlign: 'center', color: '#666' }}>No picks for Week {currentWeek} yet.</div>
-                   )}
                 </div>
 
-                {/* --- SECTION 2: HISTORICAL STATS (HARDCODED) --- */}
+                {/* HISTORICAL STATS */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                   <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>
                      📜 Season Standings (Weeks 1-11)
