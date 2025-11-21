@@ -3,9 +3,7 @@ import { signInWithGoogle, db, auth } from './firebase';
 import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// ==========================================
-// 🔒 SECURITY SETTINGS
-// ==========================================
+// --- CONFIG ---
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
   "antoniodanielvazquez@gmail.com",
@@ -28,8 +26,7 @@ const PAST_STATS = [
 
 function App() {
   const [user, setUser] = useState(null);
-  const [accessDeniedEmail, setAccessDeniedEmail] = useState(null); // STOP THE LOOP
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Starts true to hide login screen
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
   const [view, setView] = useState('dashboard'); 
@@ -39,30 +36,30 @@ function App() {
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. Login Listener (ROBUST VERSION)
+  // 1. ROBUST LOGIN LISTENER
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setLoading(true); // Start loading check
-      
       if (currentUser) {
-        // Force everything to lowercase to fix mismatch issues
+        // User is logged in via Google. Now check the guest list.
         const email = currentUser.email.toLowerCase();
-        const allowedList = ALLOWED_EMAILS.map(e => e.toLowerCase());
+        const isAllowed = ALLOWED_EMAILS.some(e => e.toLowerCase() === email);
 
-        if (allowedList.includes(email)) {
+        if (isAllowed) {
           setUser(currentUser);
-          fetchLeaderboard(); 
-          // Try audio
+          fetchLeaderboard();
+          // Try Audio
           try {
              audioRef.current.volume = 0.5;
              audioRef.current.play().catch(() => {});
           } catch (e) {}
         } else {
-          // DO NOT SIGN OUT - Show the error screen instead
-          setAccessDeniedEmail(currentUser.email);
+          alert(`🚫 Access Denied for: ${currentUser.email}`);
+          auth.signOut();
         }
+      } else {
+        setUser(null);
       }
-      setLoading(false); // Done checking
+      setLoading(false); // Stop loading regardless of outcome
     });
     return () => unsubscribe();
   }, []);
@@ -79,12 +76,13 @@ function App() {
     fetchGames();
   }, [currentWeek]);
 
-  const handleLogin = () => signInWithGoogle();
+  const handleLogin = () => {
+    setLoading(true); // Show loading while redirecting
+    signInWithGoogle();
+  };
 
   const handleLogout = () => {
     auth.signOut();
-    setUser(null);
-    setAccessDeniedEmail(null);
     window.location.reload();
   };
 
@@ -126,39 +124,19 @@ function App() {
     } catch (error) {}
   };
 
-  // ==========================================
-  // 🎨 RENDER
-  // ==========================================
+  // --- RENDER ---
 
-  // 1. ACCESS DENIED SCREEN (Debugging)
-  if (accessDeniedEmail) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column', padding: '20px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '60px', margin: '0 0 20px 0' }}>🚫</h1>
-        <h2 style={{ color: '#ff4444' }}>Access Denied</h2>
-        <p>You are currently logged in as:</p>
-        <div style={{ backgroundColor: '#333', padding: '10px 20px', borderRadius: '10px', margin: '10px 0', fontFamily: 'monospace', fontSize: '16px', border: '1px solid #555' }}>
-          {accessDeniedEmail}
-        </div>
-        <p style={{ maxWidth: '400px', color: '#888' }}>This email is not in the Guest List code. Please send this screenshot to the admin.</p>
-        <button onClick={handleLogout} style={{ marginTop: '20px', padding: '10px 20px', backgroundColor: 'white', color: 'black', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>
-          Log Out & Try Different Email
-        </button>
-      </div>
-    );
-  }
-
-  // 2. LOADING SCREEN
+  // 1. Loading Screen (Crucial for stopping the loop)
   if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column' }}>
+      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', color: 'white', flexDirection: 'column' }}>
         <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
-        <h3>Connecting...</h3>
+        <h3>Connecting to League...</h3>
       </div>
     );
   }
 
-  // 3. MAIN APP
+  // 2. Main App
   return (
     <div style={{ 
       fontFamily: 'Arial, sans-serif', 
@@ -190,7 +168,6 @@ function App() {
         <div style={{ textAlign: 'center', marginTop: '150px', padding: '20px' }}>
           <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏈</div>
           <h2 style={{ fontSize: '28px', marginBottom: '10px' }}>Private League</h2>
-          <p style={{ color: '#888', marginBottom: '40px' }}>Invitation Only • 2025 Season</p>
           <button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>
             Enter League
           </button>
@@ -244,7 +221,7 @@ function App() {
                         Pay $10 to @MrDoom ↗
                       </a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Current Week</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
