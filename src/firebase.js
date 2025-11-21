@@ -3,10 +3,10 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // ===============================================================
-// ⚠️ PASTE YOUR REAL KEYS HERE (If they aren't already)
+// 🔑 YOUR SPECIFIC KEYS (DO NOT CHANGE)
 // ===============================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI", // <--- YOUR REAL KEY
+  apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI",
   authDomain: "nfl-pick-em-2025.firebaseapp.com",
   projectId: "nfl-pick-em-2025",
   storageBucket: "nfl-pick-em-2025.firebasestorage.app",
@@ -19,7 +19,7 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 
-// --- LOGIN FUNCTION ---
+// --- LOGIN FUNCTION (POPUP MODE - Most Reliable) ---
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
