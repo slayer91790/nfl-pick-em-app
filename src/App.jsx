@@ -13,7 +13,7 @@ const ALLOWED_EMAILS = [
   "friend1@example.com"
 ];
 
-// Admin Emails (Can add/remove players & mark paid)
+// Admin Emails
 const ADMIN_EMAILS = [
   "slayer91790@gmail.com", 
   "antoniodanielvazquez@gmail.com"
@@ -41,21 +41,27 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState(12);
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
+  
+  // Guest List & Settings
   const [guestList, setGuestList] = useState([]);
   const [newEmailInput, setNewEmailInput] = useState("");
+  const [picksVisible, setPicksVisible] = useState(false); // THE LOCK TOGGLE
 
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. Load Guest List from DB
+  // 1. Load Config (Guest List & Lock Status)
   useEffect(() => {
     const loadConfig = async () => {
       const configRef = doc(db, "config", "settings");
       const docSnap = await getDoc(configRef);
       if (docSnap.exists()) {
-        setGuestList(docSnap.data().allowedEmails || []);
+        const data = docSnap.data();
+        setGuestList(data.allowedEmails || []);
+        setPicksVisible(data.picksVisible || false); // Load lock status
       } else {
-        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS] });
+        // Default Setup
+        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], picksVisible: false });
         setGuestList([...ALLOWED_EMAILS]);
       }
     };
@@ -89,12 +95,10 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Games
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
         setGames(gamesData.events || []);
 
-        // News Ticker
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
@@ -102,6 +106,29 @@ function App() {
     };
     fetchData();
   }, [currentWeek]);
+
+  // --- LOGIC: Calculate Similarities ---
+  const getSimilarSelections = () => {
+    if (!picks || Object.keys(picks).length === 0) return [];
+    
+    // Calculate diff for each player
+    const similarities = leaders
+      .filter(p => p.userId !== user.uid) // Don't compare to self
+      .map(player => {
+        const theirPicks = player[`week${currentWeek}`] || {};
+        let diff = 0;
+        // Compare every game
+        games.forEach(g => {
+          if (picks[g.id] && theirPicks[g.id] && picks[g.id] !== theirPicks[g.id]) {
+            diff++;
+          }
+        });
+        return { name: player.userName, diff };
+      });
+
+    // Sort by lowest diff (most similar)
+    return similarities.sort((a, b) => a.diff - b.diff);
+  };
 
   // --- ACTIONS ---
   const handleLogin = () => signInWithGoogle();
@@ -119,7 +146,7 @@ function App() {
 
   const submitPicks = async () => {
     if (!user) return;
-    // Validation: Check if all games are picked
+    // Validation
     if (Object.keys(picks).length < games.length) {
       alert(`❌ You have only picked ${Object.keys(picks).length} of ${games.length} games. Finish them all!`);
       return;
@@ -150,7 +177,7 @@ function App() {
     } catch (error) {}
   };
 
-  // Admin Tools
+  // --- ADMIN TOOLS ---
   const addGuest = async () => {
     if (!newEmailInput) return;
     const email = newEmailInput.toLowerCase().trim();
@@ -159,9 +186,8 @@ function App() {
     setGuestList(prev => [...prev, email]);
     setNewEmailInput("");
     
-    // Send Email Invite Logic
-    const subject = "You're invited to the NFL Pick 'Em League!";
-    const body = `Join our league for Week ${currentWeek}!\n\nLink: https://nfl-picks-2025.netlify.app/\n\nRules:\n1. $10 Buy-in per week (Winner takes pot)\n2. Pick all games straight up (no spread)\n3. Submit before Thursday kickoff if possible.\n\nGood luck!`;
+    const subject = "Invitation: NFL Pick 'Em League 2025";
+    const body = `Join the League!\n\nLink: https://nfl-picks-2025.netlify.app/\n\nRules:\n1. $10 Buy-in (Venmo @MrDoom)\n2. Winner takes the pot.\n3. Picks lock at kickoff.`;
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
@@ -178,9 +204,17 @@ function App() {
   };
 
   const resetPicks = async (userId) => {
-    if (!window.confirm("Delete picks for this week?")) return;
+    if (!window.confirm("Delete picks?")) return;
     await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField() });
     fetchLeaderboard();
+  };
+
+  const togglePicksVisibility = async () => {
+    const newState = !picksVisible;
+    await updateDoc(doc(db, "config", "settings"), { picksVisible: newState });
+    setPicksVisible(newState);
+    // Reload page to ensure everyone gets new state is strictly enforced
+    window.location.reload();
   };
 
   // --- RENDER ---
@@ -225,6 +259,7 @@ function App() {
             {/* === VIEW 1: DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                {/* Live Scores */}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div>
                   <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
@@ -233,14 +268,8 @@ function App() {
                        const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
                        return (
                          <div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                             <span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span>
-                             <span style={{fontWeight:'bold'}}>{away.score}</span>
-                           </div>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                             <span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span>
-                             <span style={{fontWeight:'bold'}}>{home.score}</span>
-                           </div>
+                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div>
+                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div>
                            <div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div>
                          </div>
                        )
@@ -248,13 +277,19 @@ function App() {
                   </div>
                 </div>
 
+                {/* Pot & Leaderboard */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                    <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
                       <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${leaders.length * 10}</h2>
                       <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Week {currentWeek} Pool</p>
                       <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>Pay $10 to @MrDoom ↗</a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
+                   
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+                     <span>Leaderboard</span>
+                     <span>{picksVisible ? "🔓 OPEN" : "🔒 PICKS HIDDEN"}</span>
+                   </div>
+
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -270,7 +305,22 @@ function App() {
                       </div>
                    ))}
                 </div>
-                {/* Historical Stats */}
+
+                {/* 🔗 SIMILAR SELECTIONS (Only Shows if Picks are Unlocked) */}
+                {picksVisible && (
+                  <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
+                    <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>🔗 Similar Selections (Diffs)</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', padding: '15px', gap: '10px' }}>
+                      {getSimilarSelections().map((sim, i) => (
+                        <div key={i} style={{ backgroundColor: i === 0 ? '#28a745' : '#333', padding: '10px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%' }}>
+                          <span style={{ fontWeight: 'bold' }}>{sim.diff} Diff:</span> {sim.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Historical */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                   <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📜 Season Standings (Weeks 1-11)</div>
                   {PAST_STATS.map((stat, index) => (
@@ -279,9 +329,7 @@ function App() {
                         <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index === 0 ? '#FFD700' : '#444', color: index === 0 ? 'black' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{stat.rank}</div>
                         <div style={{ fontWeight: 'bold', color: 'white' }}>{stat.name}</div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div>
-                      </div>
+                      <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div></div>
                     </div>
                   ))}
                 </div>
@@ -302,46 +350,34 @@ function App() {
                         <span>{game.status.type.shortDetail}</span><span style={{color: '#d9534f'}}>{odds}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', alignItems: 'center' }}>
-                        <div onClick={() => selectTeam(game.id, away.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}>
-                          <img src={away.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{away.team.abbreviation}</div>
-                        </div>
+                        <div onClick={() => selectTeam(game.id, away.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}><img src={away.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{away.team.abbreviation}</div></div>
                         <div style={{ color: '#ccc', fontWeight: 'bold' }}>@</div>
-                        <div onClick={() => selectTeam(game.id, home.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}>
-                          <img src={home.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{home.team.abbreviation}</div>
-                        </div>
+                        <div onClick={() => selectTeam(game.id, home.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}><img src={home.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{home.team.abbreviation}</div></div>
                       </div>
                     </div>
                   );
                 })}
-                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: 'pointer', zIndex: 100 }}>
-                  Submit {Object.keys(picks).length} Picks
-                </button>
+                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? "Submit All Picks" : `Pick ${games.length - Object.keys(picks).length} More`}</button>
               </div>
             )}
 
-            {/* === VIEW 3: PICK MATRIX === */}
+            {/* === VIEW 3: MATRIX (Respects Hidden State) === */}
             {view === 'matrix' && (
               <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px' }}>
+                <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px' }}>Player</th>
-                      {games.map(g => {
-                        const away = g.competitions[0].competitors.find(c => c.homeAway === 'away').team.abbreviation;
-                        const home = g.competitions[0].competitors.find(c => c.homeAway === 'home').team.abbreviation;
-                        return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '60px' }}>{away}<br/>@<br/>{home}</th>
-                      })}
-                    </tr>
-                  </thead>
+                  <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away').team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}</tr></thead>
                   <tbody>
                     {leaders.map(player => {
                       const playerPicks = player[`week${currentWeek}`] || {};
+                      // LOGIC: Show picks IF (Revealed OR Admin OR It's You)
+                      const showPicks = picksVisible || isAdmin || player.userId === user.uid;
                       return (
                         <tr key={player.userId}>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', fontWeight: 'bold' }}>{player.userName}</td>
                           {games.map(g => (
                             <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: playerPicks[g.id] ? '#28a745' : '#666' }}>
-                              {playerPicks[g.id] || "-"}
+                              {showPicks ? (playerPicks[g.id] || "-") : "🔒"}
                             </td>
                           ))}
                         </tr>
@@ -355,32 +391,22 @@ function App() {
             {/* === ADMIN VIEW === */}
             {view === 'admin' && isAdmin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* TOGGLE LOCK */}
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}>
+                  <h3>⚙️ Game Control</h3>
+                  <button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>
+                    {picksVisible ? "🔒 HIDE PICKS (Pre-Game)" : "🔓 REVEAL PICKS (Kickoff)"}
+                  </button>
+                  <p style={{ color: '#888', marginTop: '10px' }}>Current Status: {picksVisible ? "Visible to Everyone" : "Hidden"}</p>
+                </div>
+
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>👥 Manage Guest List</h3>
+                  <h3>👥 Guest List</h3>
                   <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
                     <input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="friend@gmail.com" style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }} />
-                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer' }}>Add & Invite</button>
+                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer' }}>Add</button>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    {guestList.map(email => (
-                      <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px' }}>
-                        <span>{email}</span>
-                        <button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>💰 Manage Players</h3>
-                  {leaders.map(player => (
-                    <div key={player.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #444' }}>
-                      <div style={{ fontWeight: 'bold' }}>{player.userName}</div>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => togglePaid(player.userId, player.paid)} style={{ padding: '5px 10px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: player.paid ? '#28a745' : '#555', color: 'white' }}>{player.paid ? "PAID ✅" : "Mark Paid"}</button>
-                        <button onClick={() => resetPicks(player.userId)} style={{ padding: '5px 10px', borderRadius: '5px', border: '1px solid #ff4444', cursor: 'pointer', backgroundColor: 'transparent', color: '#ff4444' }}>Reset Picks</button>
-                      </div>
-                    </div>
-                  ))}
+                  {guestList.map(email => <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginBottom: '5px' }}><span>{email}</span><button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>X</button></div>)}
                 </div>
               </div>
             )}
@@ -389,13 +415,11 @@ function App() {
         </>
       )}
 
-      {/* News Ticker Footer */}
+      {/* News Ticker */}
       {user && news.length > 0 && (
         <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#000', color: 'white', borderTop: '2px solid #28a745', overflow: 'hidden', whiteSpace: 'nowrap', zIndex: 1000 }}>
           <div style={{ display: 'inline-block', padding: '10px', animation: 'ticker 30s linear infinite' }}>
-            {news.map((n, i) => (
-              <span key={i} style={{ marginRight: '50px', fontSize: '14px', fontWeight: 'bold' }}>🏈 {n.headline}</span>
-            ))}
+            {news.map((n, i) => <span key={i} style={{ marginRight: '50px', fontSize: '14px', fontWeight: 'bold' }}>🏈 {n.headline}</span>)}
           </div>
           <style>{`@keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }`}</style>
         </div>
