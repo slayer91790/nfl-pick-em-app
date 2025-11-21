@@ -5,7 +5,6 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
 // 🔒 SECURITY SETTINGS
-// (Make sure these are all lowercase!)
 // ==========================================
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
@@ -14,9 +13,6 @@ const ALLOWED_EMAILS = [
   "friend1@example.com"
 ];
 
-// ==========================================
-// 📊 HISTORY
-// ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
   { name: "Tony",         score: 83, rank: 2, wins: 1 },
@@ -32,8 +28,8 @@ const PAST_STATS = [
 
 function App() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // Loading state
-  const [accessDenied, setAccessDenied] = useState(null); // New Denied State
+  const [accessDeniedEmail, setAccessDeniedEmail] = useState(null); // STOP THE LOOP
+  const [loading, setLoading] = useState(true);
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
   const [view, setView] = useState('dashboard'); 
@@ -43,30 +39,30 @@ function App() {
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. Login Listener (LOOP FIX)
+  // 1. Login Listener (ROBUST VERSION)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setLoading(true); // Start loading check
+      
       if (currentUser) {
-        // Normalize email to lowercase to prevent mismatches
+        // Force everything to lowercase to fix mismatch issues
         const email = currentUser.email.toLowerCase();
-        const isAllowed = ALLOWED_EMAILS.some(e => e.toLowerCase() === email);
+        const allowedList = ALLOWED_EMAILS.map(e => e.toLowerCase());
 
-        if (isAllowed) {
+        if (allowedList.includes(email)) {
           setUser(currentUser);
           fetchLeaderboard(); 
+          // Try audio
           try {
              audioRef.current.volume = 0.5;
              audioRef.current.play().catch(() => {});
           } catch (e) {}
         } else {
-          // INSTEAD OF SIGNING OUT, SET DENIED STATE
-          // This stops the loop and shows you WHY it failed.
-          setAccessDenied(currentUser.email);
+          // DO NOT SIGN OUT - Show the error screen instead
+          setAccessDeniedEmail(currentUser.email);
         }
-      } else {
-        setUser(null);
       }
-      setLoading(false); // Stop loading regardless of result
+      setLoading(false); // Done checking
     });
     return () => unsubscribe();
   }, []);
@@ -87,8 +83,8 @@ function App() {
 
   const handleLogout = () => {
     auth.signOut();
-    setAccessDenied(null);
     setUser(null);
+    setAccessDeniedEmail(null);
     window.location.reload();
   };
 
@@ -134,27 +130,30 @@ function App() {
   // 🎨 RENDER
   // ==========================================
 
-  // 1. LOADING SCREEN (Prevents flickering)
-  if (loading) {
+  // 1. ACCESS DENIED SCREEN (Debugging)
+  if (accessDeniedEmail) {
     return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column' }}>
-        <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
-        <h3>Loading League...</h3>
+      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column', padding: '20px', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '60px', margin: '0 0 20px 0' }}>🚫</h1>
+        <h2 style={{ color: '#ff4444' }}>Access Denied</h2>
+        <p>You are currently logged in as:</p>
+        <div style={{ backgroundColor: '#333', padding: '10px 20px', borderRadius: '10px', margin: '10px 0', fontFamily: 'monospace', fontSize: '16px', border: '1px solid #555' }}>
+          {accessDeniedEmail}
+        </div>
+        <p style={{ maxWidth: '400px', color: '#888' }}>This email is not in the Guest List code. Please send this screenshot to the admin.</p>
+        <button onClick={handleLogout} style={{ marginTop: '20px', padding: '10px 20px', backgroundColor: 'white', color: 'black', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>
+          Log Out & Try Different Email
+        </button>
       </div>
     );
   }
 
-  // 2. ACCESS DENIED SCREEN (Stops the loop!)
-  if (accessDenied) {
+  // 2. LOADING SCREEN
+  if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column', padding: '20px', textAlign: 'center' }}>
-        <h2 style={{ color: '#d9534f' }}>🚫 Access Denied</h2>
-        <p>You are logged in as:</p>
-        <h3 style={{ backgroundColor: '#333', padding: '10px', borderRadius: '5px' }}>{accessDenied}</h3>
-        <p>This email is not in the guest list.</p>
-        <button onClick={handleLogout} style={{ marginTop: '20px', padding: '10px 20px', backgroundColor: '#fff', color: '#000', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
-          Log Out
-        </button>
+      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column' }}>
+        <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
+        <h3>Connecting...</h3>
       </div>
     );
   }
