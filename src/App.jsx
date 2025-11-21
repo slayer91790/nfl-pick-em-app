@@ -29,7 +29,7 @@ function App() {
   useEffect(() => {
     const fetchGames = async () => {
       try {
-        // Fetches data dynamically based on the selected week
+        // USE BACKTICKS ` ` HERE, NOT SINGLE QUOTES ' '
         const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const data = await response.json();
         setGames(data.events);
