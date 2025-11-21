@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { signInWithGoogle, db, auth } from './firebase';
 import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'; // <--- ADDED getRedirectResult
+import { onAuthStateChanged } from 'firebase/auth';
 
+// --- CONFIG ---
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
   "antoniodanielvazquez@gmail.com",
@@ -25,8 +26,6 @@ const PAST_STATS = [
 
 function App() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [debugError, setDebugError] = useState(""); // <--- SHOW ERRORS ON SCREEN
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
   const [view, setView] = useState('dashboard'); 
@@ -36,54 +35,30 @@ function App() {
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. LOGIN CHECKER (Double Strength)
+  // 1. Standard Listener (No Redirect logic needed)
   useEffect(() => {
-    const checkLogin = async () => {
-      setLoading(true);
-      try {
-        // A. Check if we are returning from a Redirect
-        const result = await getRedirectResult(auth);
-        if (result && result.user) {
-           validateUser(result.user);
-           return; // Stop here if redirect worked
-        }
-      } catch (error) {
-        console.error("Redirect Error:", error);
-        setDebugError(error.message); // Show error to user
-      }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        const email = currentUser.email.toLowerCase();
+        const allowedList = ALLOWED_EMAILS.map(e => e.toLowerCase());
 
-      // B. Check standard session (Persistence)
-      onAuthStateChanged(auth, (currentUser) => {
-        if (currentUser) {
-          validateUser(currentUser);
+        if (allowedList.includes(email)) {
+          setUser(currentUser);
+          fetchLeaderboard();
+          try {
+             audioRef.current.volume = 0.5;
+             audioRef.current.play().catch(() => {});
+          } catch (e) {}
         } else {
-          setUser(null);
-          setLoading(false);
+          alert(`🚫 Access Denied: ${email} is not on the list.`);
+          auth.signOut();
         }
-      });
-    };
-
-    checkLogin();
+      } else {
+        setUser(null);
+      }
+    });
+    return () => unsubscribe();
   }, []);
-
-  // Helper to validate email
-  const validateUser = (currentUser) => {
-    const email = currentUser.email.toLowerCase();
-    const isAllowed = ALLOWED_EMAILS.some(e => e.toLowerCase() === email);
-
-    if (isAllowed) {
-      setUser(currentUser);
-      fetchLeaderboard();
-      try {
-          audioRef.current.volume = 0.5;
-          audioRef.current.play().catch(() => {});
-      } catch (e) {}
-    } else {
-      setDebugError(`Access Denied: ${email} is not on the list.`);
-      auth.signOut();
-    }
-    setLoading(false);
-  };
 
   // 2. Fetch Games
   useEffect(() => {
@@ -97,10 +72,9 @@ function App() {
     fetchGames();
   }, [currentWeek]);
 
-  const handleLogin = () => {
-    setDebugError(""); // Clear errors
-    setLoading(true);
-    signInWithGoogle();
+  // 3. Login Handler (Simple Popup)
+  const handleLogin = async () => {
+    await signInWithGoogle();
   };
 
   const handleLogout = () => {
@@ -147,16 +121,6 @@ function App() {
   };
 
   // --- RENDER ---
-
-  if (loading) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', color: 'white', flexDirection: 'column' }}>
-        <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
-        <h3>Verifying...</h3>
-      </div>
-    );
-  }
-
   return (
     <div style={{ 
       fontFamily: 'Arial, sans-serif', 
@@ -169,6 +133,7 @@ function App() {
       backgroundAttachment: 'fixed'
     }}>
       
+      {/* Header */}
       <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
         {user && (
@@ -182,24 +147,19 @@ function App() {
         )}
       </div>
 
+      {/* Login Screen */}
       {!user ? (
         <div style={{ textAlign: 'center', marginTop: '150px', padding: '20px' }}>
           <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏈</div>
           <h2 style={{ fontSize: '28px', marginBottom: '10px' }}>Private League</h2>
-          
-          {/* --- DEBUG ERROR MESSAGE --- */}
-          {debugError && (
-            <div style={{ backgroundColor: '#d9534f', color: 'white', padding: '10px', borderRadius: '5px', marginBottom: '20px', fontSize: '14px', maxWidth: '300px', margin: '0 auto 20px auto' }}>
-              {debugError}
-            </div>
-          )}
-
+          <p style={{ color: '#888', marginBottom: '40px' }}>Invitation Only • 2025 Season</p>
           <button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>
             Enter League
           </button>
         </div>
       ) : (
         <>
+          {/* Nav Tabs */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
             <button onClick={() => setView('dashboard')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'dashboard' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Dashboard</button>
             <button onClick={() => setView('picks')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'picks' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Make Picks</button>
@@ -212,6 +172,7 @@ function App() {
           </div>
 
           <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
+            
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
                 <div>
