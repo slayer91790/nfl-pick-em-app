@@ -4,7 +4,7 @@ import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
-// 🔒 SECURITY SETTINGS
+// 🔒 CONFIG
 // ==========================================
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
@@ -13,9 +13,6 @@ const ALLOWED_EMAILS = [
   "friend1@example.com"
 ];
 
-// ==========================================
-// 📊 HISTORICAL STATS
-// ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
   { name: "Tony",         score: 83, rank: 2, wins: 1 },
@@ -30,57 +27,65 @@ const PAST_STATS = [
 ];
 
 function App() {
-  // --- STATE ---
   const [user, setUser] = useState(null);
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
-  const [view, setView] = useState('dashboard'); // New default view
+  const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(12);
 
-  const audioRef = useRef(new Audio('/intro.mp3'));
+  // --- AUDIO PLAYERS ---
+  const introRef = useRef(new Audio('/intro.mp3'));
+  const funnyRef = useRef(new Audio('/funny.mp3')); // <--- NEW FUNNY SOUND
 
-  // 1. Login Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        if (ALLOWED_EMAILS.includes(currentUser.email)) {
+      if (currentUser && ALLOWED_EMAILS.includes(currentUser.email)) {
           setUser(currentUser);
           try {
-             audioRef.current.volume = 0.5;
-             audioRef.current.play().catch(() => console.log("Audio waiting for click"));
+             introRef.current.volume = 0.5;
+             introRef.current.play().catch(() => {});
           } catch (e) {}
-          // Fetch leaderboard immediately on login
           fetchLeaderboard(); 
-        } else {
-          alert("🚫 ACCESS DENIED: You are not on the guest list.");
+      } else if (currentUser) {
+          alert("🚫 ACCESS DENIED");
           auth.signOut();
-        }
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch Games
   useEffect(() => {
     const fetchGames = async () => {
       try {
         const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const data = await response.json();
         setGames(data.events);
-      } catch (error) {
-        console.error("Error fetching games:", error);
-      }
+      } catch (error) { console.error(error); }
     };
     fetchGames();
   }, [currentWeek]);
 
-  const handleLogin = () => {
-    signInWithGoogle();
-  };
+  const handleLogin = () => signInWithGoogle();
 
-  const selectTeam = (gameId, teamAbbr) => {
+  // --- SMART TEAM SELECTION (With Funny Sound Logic) ---
+  const selectTeam = (gameId, teamAbbr, oddsString) => {
     setPicks((prev) => ({ ...prev, [gameId]: teamAbbr }));
+
+    // LOGIC: If the pick is an Underdog (+) of 9 points or more...
+    // Example Spread: "NYG +10.5"
+    if (oddsString && oddsString.includes(teamAbbr) && oddsString.includes('+')) {
+      // Extract the number (remove letters)
+      const number = parseFloat(oddsString.replace(/[^0-9.]/g, ''));
+      
+      // If the underdog points are greater than 9, play the clown sound
+      if (number >= 9) {
+        try {
+          funnyRef.current.currentTime = 0; // Rewind start
+          funnyRef.current.play();
+        } catch(e) {}
+      }
+    }
   };
 
   const submitPicks = async () => {
@@ -94,44 +99,33 @@ function App() {
         [`week${currentWeek}`]: picks,
         timestamp: new Date()
       }, { merge: true });
-
       alert("✅ Picks Saved Successfully!");
       fetchLeaderboard();     
-    } catch (error) {
-      console.error("Error saving picks:", error);
-      alert("Error saving picks.");
-    }
+    } catch (error) { alert("Error saving picks."); }
   };
 
   const fetchLeaderboard = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, "picks_2025"));
       const loadedLeaders = [];
-      querySnapshot.forEach((doc) => {
-        loadedLeaders.push(doc.data());
-      });
+      querySnapshot.forEach((doc) => loadedLeaders.push(doc.data()));
       setLeaders(loadedLeaders);
-    } catch (error) {
-      console.error("Error fetching leaderboard:", error);
-    }
+    } catch (error) {}
   };
 
-  // ==========================================
-  // 🎨 RENDER
-  // ==========================================
   return (
     <div style={{ 
       fontFamily: 'Arial, sans-serif', 
       minHeight: '100vh', 
       color: 'white', 
       paddingBottom: '80px',
+      // --- BACKGROUND IMAGE ---
       backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')",
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed'
     }}>
       
-      {/* Header */}
       <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
         {user && (
@@ -142,25 +136,21 @@ function App() {
         )}
       </div>
 
-      {/* Login Screen */}
       {!user ? (
         <div style={{ textAlign: 'center', marginTop: '150px', padding: '20px' }}>
           <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏈</div>
           <h2 style={{ fontSize: '28px', marginBottom: '10px' }}>Private League</h2>
-          <p style={{ color: '#888', marginBottom: '40px' }}>Invitation Only • 2025 Season</p>
           <button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>
             Enter League
           </button>
         </div>
       ) : (
         <>
-          {/* SIMPLIFIED NAV TABS */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
-            <button onClick={() => setView('dashboard')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'dashboard' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Dashboard</button>
-            <button onClick={() => setView('picks')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'picks' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Make Picks</button>
+            <button onClick={() => setView('dashboard')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
+            <button onClick={() => setView('picks')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Make Picks</button>
           </div>
 
-          {/* Week Selector (Visible Everywhere) */}
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
             <select value={currentWeek} onChange={(e) => setCurrentWeek(e.target.value)} style={{ padding: '8px 15px', borderRadius: '10px', backgroundColor: '#222', color: 'white', border: '1px solid #444', fontSize: '16px' }}>
               {[...Array(18)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1}</option>)}
@@ -169,11 +159,8 @@ function App() {
 
           <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
             
-            {/* === VIEW 1: DASHBOARD (Scores + Standings Combined) === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                
-                {/* 1. LIVE SCOREBOARD */}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div>
                   <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
@@ -197,7 +184,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* 2. THE POT & WEEKLY STANDINGS */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
                    <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
                       <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${leaders.length * 10}</h2>
@@ -206,7 +192,7 @@ function App() {
                         Pay $10 to @MrDoom ↗
                       </a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Current Week Leaderboard</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -222,52 +208,32 @@ function App() {
                       </div>
                    ))}
                 </div>
-
-                {/* 3. HISTORICAL STATS */}
-                <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>
-                     📜 Season Standings (Weeks 1-11)
-                  </div>
-                  {PAST_STATS.map((stat, index) => (
-                    <div key={index} style={{ padding: '15px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index === 0 ? '#FFD700' : '#444', color: index === 0 ? 'black' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>
-                          {stat.rank}
-                        </div>
-                        <div style={{ fontWeight: 'bold', color: 'white' }}>{stat.name}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
-            {/* === VIEW 2: MAKE PICKS (With Spreads) === */}
             {view === 'picks' && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px' }}>
                 {games.map((game) => {
                   const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
                   const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
-                  // Extract Odds (Spread)
-                  const odds = game.competitions[0].odds && game.competitions[0].odds[0] ? game.competitions[0].odds[0].details : "No Line";
+                  const odds = game.competitions[0].odds && game.competitions[0].odds[0] ? game.competitions[0].odds[0].details : "";
                   const myPick = picks[game.id];
 
                   return (
                     <div key={game.id} style={{ backgroundColor: '#fff', borderRadius: '15px', overflow: 'hidden', color: 'black' }}>
                       <div style={{ backgroundColor: '#f0f0f0', padding: '8px', textAlign: 'center', fontSize: '11px', color: '#666', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', paddingLeft: '15px', paddingRight: '15px' }}>
                         <span>{game.status.type.shortDetail}</span>
-                        <span style={{color: '#d9534f'}}>Spread: {odds}</span>
+                        <span style={{color: '#d9534f'}}>{odds}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', alignItems: 'center' }}>
-                        <div onClick={() => selectTeam(game.id, away.team.abbreviation)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}>
+                        {/* Away Team - Pass the ODDS string to the function */}
+                        <div onClick={() => selectTeam(game.id, away.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}>
                           <img src={away.team.logo} style={{ width: '45px' }} />
                           <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{away.team.abbreviation}</div>
                         </div>
                         <div style={{ color: '#ccc', fontWeight: 'bold' }}>@</div>
-                        <div onClick={() => selectTeam(game.id, home.team.abbreviation)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}>
+                        {/* Home Team - Pass the ODDS string to the function */}
+                        <div onClick={() => selectTeam(game.id, home.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}>
                           <img src={home.team.logo} style={{ width: '45px' }} />
                           <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{home.team.abbreviation}</div>
                         </div>
