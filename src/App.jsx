@@ -250,34 +250,55 @@ function App() {
             {/* --- VIEW 3: LEADERBOARD --- */}
             {view === 'leaderboard' && (
               <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                 <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>
-                    League Standings
+                 
+                 {/* 💰 THE POT TRACKER */}
+                 <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
+                    <h2 style={{ margin: 0, fontSize: '28px', textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>
+                      🏆 Pot: ${leaders.length * 10}
+                    </h2>
+                    <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Winner Takes All</p>
+                    
+                    {/* 💸 VENMO LINK UPDATED FOR MRDOOM */}
+                    <a 
+                      href="https://venmo.com/u/MrDoom" 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
+                      Pay $10 to @MrDoom ↗
+                    </a>
                  </div>
+
+                 <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Player</span>
+                    <span>Status</span>
+                 </div>
+
                  {leaders.map((player) => (
                     <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                         {player.photo && <img src={player.photo} referrerPolicy="no-referrer" style={{ width: '40px', borderRadius: '50%', border: '1px solid #555' }} />}
                         <div>
-                          <div style={{ fontWeight: 'bold', color: 'white' }}>{player.userName}</div>
-                          <div style={{ fontSize: '12px', color: '#666' }}>Week {currentWeek} Submitted</div>
+                          <div style={{ fontWeight: 'bold', color: 'white' }}>
+                            {player.userName} 
+                            {/* 💵 PAID BADGE (Controlled by Firebase) */}
+                            {player.paid && <span title="Paid" style={{ marginLeft: '5px' }}>✅</span>}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>Week {currentWeek}</div>
                         </div>
                       </div>
-                      <div style={{ backgroundColor: '#28a745', color: 'white', padding: '5px 12px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>
-                        {player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0} Picks
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+                        <div style={{ backgroundColor: '#28a745', color: 'white', padding: '5px 12px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>
+                          {player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0} Picks
+                        </div>
+                        {/* Unpaid Warning */}
+                        {!player.paid && <span style={{ fontSize: '10px', color: '#ff4444', fontWeight: 'bold' }}>UNPAID</span>}
                       </div>
                     </div>
                  ))}
+                 
                  {leaders.length === 0 && (
-                   <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>No picks submitted for this week yet.</div>
+                   <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>No picks submitted yet.</div>
                  )}
               </div>
             )}
-
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-export default App;
