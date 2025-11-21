@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // ===============================================================
-// ⚠️ PASTE YOUR REAL KEYS HERE AGAIN (Crucial!)
+// ⚠️ PASTE YOUR REAL KEYS HERE (If they aren't already)
 // ===============================================================
 const firebaseConfig = {
   apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI", // <--- YOUR REAL KEY
@@ -19,14 +19,14 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 
-// --- SWITCHED BACK TO POPUP (More Reliable) ---
+// --- LOGIN FUNCTION ---
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error) {
     console.error("Error signing in", error);
-    alert("Login Failed: " + error.message); // Show user why it failed
+    alert("Login Failed: " + error.message);
     return null;
   }
 };
