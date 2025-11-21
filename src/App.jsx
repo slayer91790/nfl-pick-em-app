@@ -4,7 +4,7 @@ import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
-// 🔒 CONFIG
+// 🔒 CONFIG & DATA
 // ==========================================
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
@@ -33,28 +33,29 @@ function App() {
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(12);
+  const [hasPlayedIntro, setHasPlayedIntro] = useState(false); // Track if music played
 
-  // --- AUDIO PLAYERS ---
+  // --- AUDIO SETUP ---
   const introRef = useRef(new Audio('/intro.mp3'));
-  const funnyRef = useRef(new Audio('/funny.mp3')); // <--- NEW FUNNY SOUND
+  const funnyRef = useRef(new Audio('/funny.mp3'));
 
+  // 1. Login Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser && ALLOWED_EMAILS.includes(currentUser.email)) {
+      if (currentUser) {
+        if (ALLOWED_EMAILS.includes(currentUser.email)) {
           setUser(currentUser);
-          try {
-             introRef.current.volume = 0.5;
-             introRef.current.play().catch(() => {});
-          } catch (e) {}
           fetchLeaderboard(); 
-      } else if (currentUser) {
-          alert("🚫 ACCESS DENIED");
+        } else {
+          alert("🚫 ACCESS DENIED: You are not on the guest list.");
           auth.signOut();
+        }
       }
     });
     return () => unsubscribe();
   }, []);
 
+  // 2. Fetch Games
   useEffect(() => {
     const fetchGames = async () => {
       try {
@@ -68,20 +69,35 @@ function App() {
 
   const handleLogin = () => signInWithGoogle();
 
-  // --- SMART TEAM SELECTION (With Funny Sound Logic) ---
+  const handleLogout = () => {
+    auth.signOut();
+    setUser(null);
+    window.location.reload(); // Force refresh to clear state
+  };
+
+  // --- AUDIO TRIGGER (Fixes Autoplay Block) ---
+  const changeView = (newView) => {
+    setView(newView);
+    // Only play if we haven't played it yet
+    if (!hasPlayedIntro) {
+      try {
+        introRef.current.volume = 0.5;
+        introRef.current.play().catch(e => console.log("Audio blocked:", e));
+        setHasPlayedIntro(true);
+      } catch(e) {}
+    }
+  };
+
+  // --- SMART PICKS (Funny Sound) ---
   const selectTeam = (gameId, teamAbbr, oddsString) => {
     setPicks((prev) => ({ ...prev, [gameId]: teamAbbr }));
 
-    // LOGIC: If the pick is an Underdog (+) of 9 points or more...
-    // Example Spread: "NYG +10.5"
+    // Play sound if huge underdog (+9 or more)
     if (oddsString && oddsString.includes(teamAbbr) && oddsString.includes('+')) {
-      // Extract the number (remove letters)
       const number = parseFloat(oddsString.replace(/[^0-9.]/g, ''));
-      
-      // If the underdog points are greater than 9, play the clown sound
       if (number >= 9) {
         try {
-          funnyRef.current.currentTime = 0; // Rewind start
+          funnyRef.current.currentTime = 0;
           funnyRef.current.play();
         } catch(e) {}
       }
@@ -119,19 +135,27 @@ function App() {
       minHeight: '100vh', 
       color: 'white', 
       paddingBottom: '80px',
-      // --- BACKGROUND IMAGE ---
       backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')",
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed'
     }}>
       
-      <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+      {/* Header with Logout */}
+      <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '12px', color: '#ccc' }}>{user.displayName}</span>
-            <img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12px', color: '#ccc', display: 'none', sm: 'block' }}>{user.displayName}</span>
+              <img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} />
+            </div>
+            {/* LOGOUT BUTTON */}
+            <button 
+              onClick={handleLogout}
+              style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>
+              Logout
+            </button>
           </div>
         )}
       </div>
@@ -146,9 +170,10 @@ function App() {
         </div>
       ) : (
         <>
+          {/* Tabs (Triggers Audio) */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
-            <button onClick={() => setView('dashboard')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
-            <button onClick={() => setView('picks')} style={{ padding: '10px 30px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Make Picks</button>
+            <button onClick={() => changeView('dashboard')} style={{ padding: '10px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'dashboard' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Dashboard</button>
+            <button onClick={() => changeView('picks')} style={{ padding: '10px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: view === 'picks' ? '0 4px 15px rgba(40, 167, 69, 0.4)' : 'none' }}>Make Picks</button>
           </div>
 
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
@@ -192,7 +217,7 @@ function App() {
                         Pay $10 to @MrDoom ↗
                       </a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Current Week</div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -208,6 +233,21 @@ function App() {
                       </div>
                    ))}
                 </div>
+
+                <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
+                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📜 Season Standings (Weeks 1-11)</div>
+                  {PAST_STATS.map((stat, index) => (
+                    <div key={index} style={{ padding: '15px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index === 0 ? '#FFD700' : '#444', color: index === 0 ? 'black' : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{stat.rank}</div>
+                        <div style={{ fontWeight: 'bold', color: 'white' }}>{stat.name}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -218,7 +258,6 @@ function App() {
                   const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
                   const odds = game.competitions[0].odds && game.competitions[0].odds[0] ? game.competitions[0].odds[0].details : "";
                   const myPick = picks[game.id];
-
                   return (
                     <div key={game.id} style={{ backgroundColor: '#fff', borderRadius: '15px', overflow: 'hidden', color: 'black' }}>
                       <div style={{ backgroundColor: '#f0f0f0', padding: '8px', textAlign: 'center', fontSize: '11px', color: '#666', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', paddingLeft: '15px', paddingRight: '15px' }}>
@@ -226,13 +265,11 @@ function App() {
                         <span style={{color: '#d9534f'}}>{odds}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', alignItems: 'center' }}>
-                        {/* Away Team - Pass the ODDS string to the function */}
                         <div onClick={() => selectTeam(game.id, away.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}>
                           <img src={away.team.logo} style={{ width: '45px' }} />
                           <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{away.team.abbreviation}</div>
                         </div>
                         <div style={{ color: '#ccc', fontWeight: 'bold' }}>@</div>
-                        {/* Home Team - Pass the ODDS string to the function */}
                         <div onClick={() => selectTeam(game.id, home.team.abbreviation, odds)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}>
                           <img src={home.team.logo} style={{ width: '45px' }} />
                           <div style={{ fontWeight: 'bold', fontSize: '14px', marginTop: '5px' }}>{home.team.abbreviation}</div>
@@ -248,7 +285,6 @@ function App() {
                 )}
               </div>
             )}
-
           </div>
         </>
       )}
