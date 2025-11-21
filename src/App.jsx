@@ -1,20 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { signInWithGoogle, db, auth } from './firebase';
 import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth'; // Import the listener
+import { onAuthStateChanged } from 'firebase/auth'; // <--- REQUIRED FOR LOGIN FIX
 
 // ==========================================
 // 🔒 SECURITY SETTINGS
 // ==========================================
 const ALLOWED_EMAILS = [
-  "slayer91790@gmail.com", 
+  "slayer91790@gmail.com",  // <--- YOUR EMAIL
   "antoniodanielvazquez@gmail.com",
   "crazynphat13@gmail.com",
   "friend1@example.com"
 ];
 
 // ==========================================
-// 📊 HISTORY FROM YOUR SPREADSHEET
+// 📊 HISTORY FROM YOUR SPREADSHEET (WEEKS 1-11)
 // ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
@@ -39,24 +39,24 @@ function App() {
 
   const audioRef = useRef(new Audio('/intro.mp3'));
 
-  // 1. Listen for Login Status (Works with Redirects)
+  // ==========================================
+  // 1. LOGIN LOGIC (THE FIX IS HERE)
+  // ==========================================
   useEffect(() => {
+    // This listens for the redirect to finish and logs you in automatically
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         if (ALLOWED_EMAILS.includes(currentUser.email)) {
           setUser(currentUser);
-          // Try to play audio on login success
+          // Try to play audio
           try {
              audioRef.current.volume = 0.5;
-             // Audio often needs a click first, but we try anyway
-             audioRef.current.play().catch(() => console.log("Audio blocked until click"));
+             audioRef.current.play().catch(() => console.log("Audio waiting for click"));
           } catch (e) {}
         } else {
           alert("🚫 ACCESS DENIED: You are not on the guest list.");
           auth.signOut();
         }
-      } else {
-        setUser(null);
       }
     });
     return () => unsubscribe();
@@ -76,9 +76,9 @@ function App() {
     fetchGames();
   }, [currentWeek]);
 
-  // 3. Handle Login Button Click
+  // 3. Handle Login Click
   const handleLogin = () => {
-    signInWithGoogle(); // This now redirects the page
+    signInWithGoogle(); // Redirects immediately
   };
 
   // 4. Handle Picks
