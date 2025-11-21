@@ -5,6 +5,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 
 // ==========================================
 // 🔒 SECURITY SETTINGS
+// (Make sure these are all lowercase!)
 // ==========================================
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com",
@@ -14,7 +15,7 @@ const ALLOWED_EMAILS = [
 ];
 
 // ==========================================
-// 📊 HISTORY (WEEKS 1-11)
+// 📊 HISTORY
 // ==========================================
 const PAST_STATS = [
   { name: "Albert",       score: 89, rank: 1, wins: 4 },
@@ -30,9 +31,9 @@ const PAST_STATS = [
 ];
 
 function App() {
-  // --- STATE ---
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // <--- NEW LOADING STATE
+  const [loading, setLoading] = useState(true); // Loading state
+  const [accessDenied, setAccessDenied] = useState(null); // New Denied State
   const [games, setGames] = useState([]);
   const [picks, setPicks] = useState({});
   const [view, setView] = useState('dashboard'); 
@@ -42,24 +43,30 @@ function App() {
   const audioRef = useRef(new Audio('/intro.mp3'));
   const funnyRef = useRef(new Audio('/funny.mp3'));
 
-  // 1. Login Listener (With Loading Fix)
+  // 1. Login Listener (LOOP FIX)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        if (ALLOWED_EMAILS.includes(currentUser.email)) {
+        // Normalize email to lowercase to prevent mismatches
+        const email = currentUser.email.toLowerCase();
+        const isAllowed = ALLOWED_EMAILS.some(e => e.toLowerCase() === email);
+
+        if (isAllowed) {
           setUser(currentUser);
           fetchLeaderboard(); 
-          // Try audio
           try {
              audioRef.current.volume = 0.5;
              audioRef.current.play().catch(() => {});
           } catch (e) {}
         } else {
-          alert("🚫 ACCESS DENIED: You are not on the guest list.");
-          auth.signOut();
+          // INSTEAD OF SIGNING OUT, SET DENIED STATE
+          // This stops the loop and shows you WHY it failed.
+          setAccessDenied(currentUser.email);
         }
+      } else {
+        setUser(null);
       }
-      setLoading(false); // <--- STOP LOADING ONCE CHECK IS DONE
+      setLoading(false); // Stop loading regardless of result
     });
     return () => unsubscribe();
   }, []);
@@ -80,6 +87,7 @@ function App() {
 
   const handleLogout = () => {
     auth.signOut();
+    setAccessDenied(null);
     setUser(null);
     window.location.reload();
   };
@@ -125,26 +133,33 @@ function App() {
   // ==========================================
   // 🎨 RENDER
   // ==========================================
-  
-  // --- 1. SHOW LOADING SCREEN IF CHECKING ID ---
+
+  // 1. LOADING SCREEN (Prevents flickering)
   if (loading) {
     return (
-      <div style={{ 
-        height: '100vh', 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        backgroundColor: '#121212', 
-        color: 'white', 
-        flexDirection: 'column' 
-      }}>
+      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column' }}>
         <div style={{ fontSize: '40px', marginBottom: '20px' }}>🏈</div>
-        <h3>Verifying ID...</h3>
+        <h3>Loading League...</h3>
       </div>
     );
   }
 
-  // --- 2. MAIN APP ---
+  // 2. ACCESS DENIED SCREEN (Stops the loop!)
+  if (accessDenied) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212', color: 'white', flexDirection: 'column', padding: '20px', textAlign: 'center' }}>
+        <h2 style={{ color: '#d9534f' }}>🚫 Access Denied</h2>
+        <p>You are logged in as:</p>
+        <h3 style={{ backgroundColor: '#333', padding: '10px', borderRadius: '5px' }}>{accessDenied}</h3>
+        <p>This email is not in the guest list.</p>
+        <button onClick={handleLogout} style={{ marginTop: '20px', padding: '10px 20px', backgroundColor: '#fff', color: '#000', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+          Log Out
+        </button>
+      </div>
+    );
+  }
+
+  // 3. MAIN APP
   return (
     <div style={{ 
       fontFamily: 'Arial, sans-serif', 
@@ -230,7 +245,7 @@ function App() {
                         Pay $10 to @MrDoom ↗
                       </a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Current Week</div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
