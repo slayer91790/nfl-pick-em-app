@@ -55,7 +55,7 @@ function App() {
 
   // Refs & Audio
   const introRef = useRef(new Audio('/intro.mp3'));
-  const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); // FIX: Use useMemo
+  const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
   const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
   // 1. Load Config (UNCHANGED)
@@ -63,7 +63,7 @@ function App() {
     // ...
   }, []);
 
-  // 2. Login (INTRO SONG REMOVED)
+  // 2. Login (UNCHANGED)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
@@ -87,7 +87,7 @@ function App() {
       // ARCHIVE MODE
       if (OLD_WEEKS[weekNum]) {
         const archive = OLD_WEEKS[weekNum];
-        // ... (Archive logic - setGames and setLeaders) ...
+        // ... (Archived games/leaders logic - same as before)
         return; 
       }
 
@@ -104,7 +104,11 @@ function App() {
         
         const querySnapshot = await getDocs(collection(db, "picks_2025"));
         const loadedLeaders = [];
-        querySnapshot.forEach((doc) => loadedLeaders.push(doc.data()));
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.paid === undefined) data.paid = false;
+          loadedLeaders.push(data);
+        });
         setLeaders(loadedLeaders);
 
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
@@ -119,19 +123,28 @@ function App() {
     return () => clearInterval(refreshInterval);
   }, [currentWeek, user]);
 
-  // --- ACTIONS & LOGIC ---
-  const getCellColor = (pick, winner) => { /* ... */ };
-  const getDisplayName = (player) => { /* ... */ return player.userName; };
-  const calculateStats = (gameId, team) => { /* ... */ };
+  // --- LOGIC ---
+  const getCellColor = (pick, winner) => {
+    if (!pick) return '#666'; 
+    if (!winner) return '#fff'; 
+    return pick === winner ? '#28a745' : '#d9534f'; 
+  };
+  const getDisplayName = (player) => { return player.userName; };
+  const calculateStats = (gameId, team) => {
+    if (!leaders.length) return 0;
+    const pickCount = leaders.filter(p => p[`week${currentWeek}`] && p[`week${currentWeek}`][gameId] === team).length;
+    return Math.round((pickCount / leaders.length) * 100);
+  };
 
+  // --- ACTIONS ---
   const handleLogin = () => signInWithGoogle();
   const handleLogout = () => { auth.signOut(); window.location.reload(); };
 
-  // 🔊 FIXED: Smart Team Selection (Rotation Logic)
   const selectTeam = (gameId, teamAbbr, oddsString, targetPicksState, setTargetPicksState) => {
     const setPicksFunc = setTargetPicksState || setPicks;
     setPicksFunc((prev) => ({ ...prev, [gameId]: teamAbbr }));
     
+    // Funny Sound Logic
     if (oddsString && (oddsString.includes('+') || oddsString.includes('-'))) {
       const match = oddsString.match(/([A-Z]{2,3})\s*([+-]?)(\d+\.?\d*)/); 
       
@@ -168,16 +181,107 @@ function App() {
   };
   
   // --- ADMIN ACTIONS ---
-  // ... (Full Admin functions for Paid, Reset, Add Guest, etc.) ...
-  
-  // --- RENDER (Skipping login screen JSX) ---
-  if (!user) {
-    // ... Login Screen JSX ...
-    return (<div style={{textAlign: 'center', marginTop: '150px'}}><button onClick={handleLogin}>Enter League</button></div>); 
-  }
+  const toggleSelectUser = (userId) => { /* ... */ };
+  const markSelectedPaid = async () => { /* ... */ };
+  const submitAdminPicks = async () => { /* ... */ };
+  const addGuest = async () => { /* ... */ };
+  const removeGuest = async (email) => { /* ... */ };
+  const togglePicksVisibility = async () => { /* ... */ };
+  const resetPicks = async (userId) => { /* ... */ };
+
+  // --- RENDER FUNCTIONS ---
+  const renderGamePicks = (targetPicks, setTargetPicks, targetTiebreaker, setTargetTiebreaker, isReadOnly = false) => (
+    // ... (Game card rendering JSX) ...
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px', maxWidth: '800px', margin: '0 auto' }}>
+        {games.map((game) => {
+          const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
+          const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
+          if (!home || !away) return null;
+          
+          const odds = game.competitions[0].odds && game.competitions[0].odds[0] ? game.competitions[0].odds[0].details : "";
+          const myPick = targetPicks[game.id];
+          const select = () => selectTeam(game.id, away.team.abbreviation, odds, targetPicks, setTargetPicks);
+          const selectHome = () => selectTeam(game.id, home.team.abbreviation, odds, targetPicks, setTargetPicks);
+          
+          return (
+            <div key={game.id} style={{ backgroundColor: '#fff', borderRadius: '15px', overflow: 'hidden', color: 'black' }}>
+              <div style={{ backgroundColor: '#f0f0f0', padding: '8px', textAlign: 'center', fontSize: '11px', color: '#666', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', paddingLeft: '15px', paddingRight: '15px' }}>
+                <span>{game.status.type.shortDetail}</span><span style={{color: '#d9534f'}}>{odds}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', alignItems: 'center' }}>
+                <div onClick={isReadOnly ? null : select} style={{ flex: 1, textAlign: 'center', cursor: isReadOnly ? 'default' : 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}><img src={away.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{away.team.abbreviation}</div></div>
+                <div style={{ color: '#ccc', fontWeight: 'bold' }}>@</div>
+                <div onClick={isReadOnly ? null : selectHome} style={{ flex: 1, textAlign: 'center', cursor: isReadOnly ? 'default' : 'pointer', border: myPick === home.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === home.team.abbreviation ? '#e6fffa' : 'transparent' }}><img src={home.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{home.team.abbreviation}</div></div>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ gridColumn: '1 / -1', backgroundColor: '#333', padding: '20px', borderRadius: '15px', textAlign: 'center' }}>
+          <h3>Tiebreaker: MNF Score</h3>
+          <input type="number" value={targetTiebreaker} onChange={isReadOnly ? null : (e) => setTargetTiebreaker(e.target.value)} placeholder="e.g. 45" style={{ padding: '10px', borderRadius: '5px', border: 'none', fontSize: '20px', width: '100px', textAlign: 'center' }} readOnly={isReadOnly} />
+        </div>
+    </div>
+  );
 
   return (
-    // ... Full Render JSX ...
+    <div style={{ fontFamily: 'Arial, sans-serif', minHeight: '100vh', color: 'white', paddingBottom: '80px', backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
+      
+      {/* Header (Skipped for brevity) */}
+      {/* Login Screen (Skipped for brevity) */}
+      
+      {/* --- CONTENT START --- */}
+      {user && (
+        <>
+          {/* Nav Tabs (Skipped for brevity) */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '20px 0', flexWrap: 'wrap' }}>
+            <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
+            <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Make Picks</button>
+            <button onClick={() => setView('matrix')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'matrix' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>All Picks</button>
+            {isAdmin && <button onClick={() => setView('admin')} style={{ padding: '8px 20px', borderRadius: '30px', border: '2px solid gold', backgroundColor: view === 'admin' ? 'gold' : 'transparent', color: view === 'admin' ? 'black' : 'gold', fontWeight: 'bold', cursor: 'pointer' }}>👑 Admin</button>}
+          </div>
+
+          {/* Week Selector (Skipped for brevity) */}
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <select value={currentWeek} onChange={(e) => setCurrentWeek(e.target.value)} style={{ padding: '8px 15px', borderRadius: '10px', backgroundColor: '#222', color: 'white', border: '1px solid #444', fontSize: '16px' }}>
+              {[...Array(18)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1}</option>)}
+            </select>
+          </div>
+
+          {/* CONTENT VIEWS */}
+          <div style={{ maxWidth: '100%', overflowX: 'auto', padding: '0 15px' }}>
+            
+            {/* VIEW: PICKS */}
+            {view === 'picks' && (
+              <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
+                  {renderGamePicks(picks, setPicks, tiebreaker, setTiebreaker, false)}
+                  <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length && tiebreaker ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length && tiebreaker ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? "Submit All Picks" : `Pick ${games.length - Object.keys(picks).length} More`}</button>
+              </div>
+            )}
+            
+            {/* VIEW: ADMIN */}
+            {view === 'admin' && isAdmin && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px', margin: '0 auto' }}>
+                {/* ... (Admin Content) ... */}
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "🔒 HIDE PICKS" : "🔓 REVEAL PICKS"}</button></div>
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>💰 Manage Payments (Week {currentWeek})</h3>
+                  <div style={{ marginBottom: '15px', textAlign: 'center' }}>
+                      <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', width: '100%', fontWeight: 'bold' }}>
+                          Mark {selectedPaidUsers.length} Selected as Paid
+                      </button>
+                  </div>
+                  {/* ... (Player list with checkboxes) ... */}
+                </div>
+                {/* ... (Admin Pick Entry) ... */}
+              </div>
+            )}
+            
+            {/* ... (Dashboard and Matrix views - omitted for brevity) ... */}
+          </div>
+        </>
+      )}
+      {/* Ticker (Skipped for brevity) */}
+    </div>
   );
 }
 
