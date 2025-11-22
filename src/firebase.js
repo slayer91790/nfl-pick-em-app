@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // ===============================================================
-// 🔑 YOUR SPECIFIC KEYS (DO NOT CHANGE)
+// 🔑 YOUR SPECIFIC KEYS (HARDCODED FROM SAVED INFO)
 // ===============================================================
 const firebaseConfig = {
   apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI",
@@ -19,7 +19,6 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 
-// --- LOGIN FUNCTION (POPUP MODE - Most Reliable) ---
 export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
