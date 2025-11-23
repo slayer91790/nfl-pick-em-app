@@ -57,7 +57,7 @@ function App() {
   const musicPlayedRef = useRef(false);
   const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
-  // 1. Load Config
+  // --- 1. Load Config ---
   useEffect(() => {
     const loadConfig = async () => {
       const configRef = doc(db, "config", "settings");
@@ -76,7 +76,7 @@ function App() {
     loadConfig();
   }, []);
 
-  // 2. Auth Listener
+  // --- 2. Auth Listener ---
   useEffect(() => {
     if (!configLoaded) return; 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -87,11 +87,7 @@ function App() {
           setUser(currentUser);
           setIsAdmin(ADMIN_EMAILS.some(e => e.toLowerCase() === email));
           if (!musicPlayedRef.current) { 
-            try { 
-              introRef.current.volume = 0.5; 
-              introRef.current.play().catch(() => {}); 
-              musicPlayedRef.current = true; 
-            } catch (e) {} 
+            try { introRef.current.volume = 0.5; introRef.current.play().catch(() => {}); musicPlayedRef.current = true; } catch (e) {} 
           }
         } else { alert(`🚫 Access Denied`); auth.signOut(); }
       } else { setUser(null); }
@@ -99,7 +95,7 @@ function App() {
     return () => unsubscribe();
   }, [configLoaded, guestList]);
 
-  // 3. Data Fetching
+  // --- 3. Data Fetching ---
   useEffect(() => {
     const fetchData = async () => {
       const weekNum = Number(currentWeek);
@@ -123,7 +119,6 @@ function App() {
         const loadedLeaders = [];
         querySnapshot.forEach((doc) => {
           const data = doc.data();
-          if (data.paid === undefined) data.paid = false;
           loadedLeaders.push(data);
         });
         setLeaders(loadedLeaders);
@@ -139,16 +134,16 @@ function App() {
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
-      } catch (error) { console.error(error); }
+      } catch (error) { console.error("API Error", error); }
     };
     const refreshInterval = setInterval(fetchData, 60000); 
     fetchData();
     return () => clearInterval(refreshInterval);
   }, [currentWeek, user]);
 
-  // --- LOGIC ---
-  const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
+  // --- HELPERS ---
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
+  const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
   const calculateStats = (gameId, team) => {
     if (!leaders.length) return 0;
     let pickCount = 0;
@@ -171,6 +166,12 @@ function App() {
         }
     });
     return score;
+  };
+  const getTotalSeasonWins = (player) => {
+      const pastData = PAST_STATS.find(p => p.name === getDisplayName(player));
+      const pastScore = pastData ? pastData.score : 0;
+      const currentScore = getCorrectCountForPlayer(player);
+      return pastScore + currentScore;
   };
   const getSimilarSelections = () => {
     if (!picks || Object.keys(picks).length === 0) return [];
@@ -219,15 +220,37 @@ function App() {
   
   // --- ADMIN ACTIONS ---
   const toggleSelectUser = (userId) => { setSelectedPaidUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]); };
+  
+  // Select All Helper
+  const toggleSelectAll = () => {
+     if (selectedPaidUsers.length === leaders.length) { setSelectedPaidUsers([]); } 
+     else { setSelectedPaidUsers(leaders.map(l => l.userId)); }
+  };
+
   const markSelectedPaid = async () => {
     if (!selectedPaidUsers.length) return;
     try {
       const batch = writeBatch(db);
-      selectedPaidUsers.forEach((uid) => { batch.update(doc(db, "picks_2025", uid), { paid: true }); });
+      selectedPaidUsers.forEach((uid) => { batch.update(doc(db, "picks_2025", uid), { [`paid_week${currentWeek}`]: true }); });
       await batch.commit();
       alert(`✅ Users Paid!`); setSelectedPaidUsers([]); window.location.reload(); 
     } catch (e) { alert("Error"); }
   };
+
+  // 🟢 FIX: Update state locally instead of reload
+  const toggleWeekPayment = async (userId, weekNum, currentStatus) => {
+     const ref = doc(db, "picks_2025", userId);
+     await updateDoc(ref, { [`paid_week${weekNum}`]: !currentStatus });
+     
+     // Optimistic UI update (No Reload)
+     setLeaders(prev => prev.map(player => {
+         if (player.userId === userId) {
+             return { ...player, [`paid_week${weekNum}`]: !currentStatus };
+         }
+         return player;
+     }));
+  };
+
   const submitAdminPicks = async () => {
     if (!adminTargetUser) return;
     await setDoc(doc(db, "picks_2025", adminTargetUser.userId), {
@@ -246,7 +269,7 @@ function App() {
   const togglePicksVisibility = async () => { const newState = !picksVisible; await updateDoc(doc(db, "config", "settings"), { picksVisible: newState }); setPicksVisible(newState); window.location.reload(); };
   const resetPicks = async (userId) => { if (window.confirm("Reset?")) await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField(), tiebreaker: deleteField() }); window.location.reload(); };
 
-  // --- RENDER COMPONENT ---
+  // --- RENDER FUNCTION ---
   const renderPicksGrid = (targetPicks, setTargetPicks, targetTiebreaker, setTargetTiebreaker, isReadOnly = false) => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px', maxWidth: '800px', margin: '0 auto' }}>
         {games.map((game) => {
@@ -275,63 +298,70 @@ function App() {
     </div>
   );
 
-  // --- MAIN UI ---
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', minHeight: '100vh', color: 'white', paddingBottom: '80px', backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
-      
-      {/* HEADER */}
       <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
         {user && ( <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}><img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} /><button onClick={handleLogout} style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Logout</button></div> )}
       </div>
-
       {!user ? ( <div style={{ textAlign: 'center', marginTop: '150px' }}><button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>Enter League</button></div> ) : (
         <>
-          {/* NAV TABS */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '20px 0', flexWrap: 'wrap' }}>
             <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
             <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: hasSubmitted ? '2px solid #28a745' : 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
             <button onClick={() => setView('matrix')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'matrix' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>All Picks</button>
             {isAdmin && <button onClick={() => setView('admin')} style={{ padding: '8px 20px', borderRadius: '30px', border: '2px solid gold', backgroundColor: view === 'admin' ? 'gold' : 'transparent', color: view === 'admin' ? 'black' : 'gold', fontWeight: 'bold', cursor: 'pointer' }}>👑 Admin</button>}
           </div>
-
           <div style={{ textAlign: 'center', marginBottom: '20px' }}><select value={currentWeek} onChange={(e) => setCurrentWeek(e.target.value)} style={{ padding: '8px 15px', borderRadius: '10px', backgroundColor: '#222', color: 'white', border: '1px solid #444', fontSize: '16px' }}>{[...Array(18)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1}</option>)}</select></div>
-
           <div style={{ maxWidth: '100%', overflowX: 'auto', padding: '0 15px' }}>
             
-            {/* === DASHBOARD (UPDATED) === */}
+            {/* === DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '800px', margin: '0 auto' }}>
                 <div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div><div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>{games.map((game) => { const home = game.competitions[0].competitors.find(c => c.homeAway === 'home'); const away = game.competitions[0].competitors.find(c => c.homeAway === 'away'); if (!home || !away) return null; return (<div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div><div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div></div>) })}</div></div>
                 
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Player Status (Week {currentWeek})</span><span>Paid / Submitted</span></div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Player Status (Week {currentWeek})</span><span>Paid / Picked</span></div>
                    {leaders.map((player) => {
                       const weekPicks = player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0;
+                      const isPaid = player[`paid_week${currentWeek}`] === true;
                       return (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                           {player.photo && <img src={player.photo} referrerPolicy="no-referrer" style={{ width: '40px', borderRadius: '50%', border: '1px solid #555' }} />}
                           <div style={{ fontWeight: 'bold', color: 'white' }}>{getDisplayName(player)}</div>
                         </div>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            <div style={{ color: player.paid ? '#28a745' : '#ff4444', fontSize: '20px' }}>{player.paid ? '💲' : '❌'}</div>
+                        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+                            <div style={{ backgroundColor: isPaid ? '#28a745' : '#d9534f', padding:'4px 8px', borderRadius:'5px', fontSize:'10px', fontWeight:'bold' }}>{isPaid ? 'PAID' : 'UNPAID'}</div>
                             <div style={{ color: weekPicks > 0 ? '#28a745' : '#666', fontSize: '20px' }}>{weekPicks > 0 ? '✅' : '⏳'}</div>
                         </div>
                       </div>
                    )})}
                 </div>
+                
+                <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
+                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>🏆 Full Season Leaderboard</div>
+                  {leaders.sort((a,b) => getTotalSeasonWins(b) - getTotalSeasonWins(a)).map((player, index) => (
+                    <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                         <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index===0?'gold':'#444', color: index===0?'black':'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{index+1}</div>
+                         <div style={{ fontWeight: 'bold', color: 'white' }}>{getDisplayName(player)}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold' }}>{getTotalSeasonWins(player)} Correct</div></div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            {/* === MATRIX (ALL PICKS + LEADERBOARD) === */}
+            {/* === MATRIX === */}
             {view === 'matrix' && (
               <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px', margin: '0 auto' }}>
                 <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🔗 Similar Selections</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>{getSimilarSelections().map((sim, i) => (<div key={i} style={{ backgroundColor: '#333', padding: '8px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%', border: '1px solid #555' }}><span style={{ fontWeight: 'bold', color: '#28a745' }}>{sim.diff} Diff:</span> {sim.name}</div>))}</div>
                 <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🏆 Live Leaderboard (Projected)</div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white', marginBottom: '30px' }}>
-                    <thead><tr><th style={{textAlign:'left', padding:'10px'}}>Player</th><th>Correct</th><th>Proj Wins</th></tr></thead>
+                    <thead><tr><th style={{textAlign:'left', padding:'10px'}}>Player</th><th>Correct</th><th>Proj Wins (Wk {currentWeek})</th></tr></thead>
                     <tbody>{leaders.sort((a,b) => getCorrectCountForPlayer(b) - getCorrectCountForPlayer(a)).map(p => (<tr key={p.userId}><td style={{padding:'10px'}}>{getDisplayName(p)}</td><td style={{color:'#28a745', fontWeight:'bold'}}>{getCorrectCountForPlayer(p)}</td><td>{getProjectedWins(p)}</td></tr>))}</tbody>
                 </table>
                 <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{Number(currentWeek) < 12 || picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
@@ -374,27 +404,83 @@ function App() {
                     <h3>📊 Weekly Stats</h3>
                     <div style={{ display: 'flex', justifyContent: 'space-around' }}>
                         <div>📝 Submitted: <span style={{color:'#28a745', fontWeight:'bold'}}>{leaders.filter(l => l[`week${currentWeek}`]).length} / {leaders.length}</span></div>
-                        <div>💰 Paid: <span style={{color:'#28a745', fontWeight:'bold'}}>{leaders.filter(l => l.paid).length} / {leaders.length}</span></div>
+                        <div>💰 Paid: <span style={{color:'#28a745', fontWeight:'bold'}}>{leaders.filter(l => l[`paid_week${currentWeek}`] === true).length} / {leaders.length}</span></div>
                         <div>🏆 Pot: <span style={{color:'gold', fontWeight:'bold'}}>${leaders.length * 10}</span></div>
                     </div>
                  </div>
 
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "🔒 HIDE PICKS" : "🔓 REVEAL PICKS"}</button></div>
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#28a745' : '#d9534f', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "✅ Picks are Visible" : "⚠ Waiting for Kickoff? Click to Reveal"}</button></div>
                 
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>💰 Manage Payments</h3>
-                  <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', width: '100%', fontWeight: 'bold', marginBottom:'10px' }}>Mark {selectedPaidUsers.length} Paid</button>
+                  <h3>💰 Manage Payments (Week {currentWeek})</h3>
+                  <div style={{ marginBottom: '15px', textAlign: 'center' }}>
+                      <button onClick={() => toggleSelectAll()} style={{ marginRight:'10px', padding:'8px 15px', borderRadius:'5px', border:'1px solid #666', background:'transparent', color:'white', cursor:'pointer' }}>{selectedPaidUsers.length === leaders.length ? "Deselect All" : "Select All"}</button>
+                      <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', fontWeight: 'bold' }}>
+                          Mark {selectedPaidUsers.length} Selected as Paid
+                      </button>
+                  </div>
                   {leaders.map(player => (
                     <div key={player.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #444', backgroundColor: selectedPaidUsers.includes(player.userId) ? '#333' : 'transparent' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} style={{ width: '20px', height: '20px' }} />
-                          <div style={{ fontWeight: 'bold' }}>{getDisplayName(player)} {player.paid && <span>✅</span>}</div>
+                          <div style={{ fontWeight: 'bold' }}>{getDisplayName(player)} {player[`paid_week${currentWeek}`] && <span>✅</span>}</div>
                       </div>
-                      <button onClick={() => resetPicks(player.userId)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset</button>
+                      <div style={{display:'flex', gap:'10px'}}>
+                          <button onClick={() => resetPicks(player.userId)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset</button>
+                      </div>
                     </div>
                   ))}
                 </div>
-                {/* ... Guest List & Admin Pick Entry ... */}
+
+                {/* 💸 PAYMENT MATRIX */}
+                <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>💸 Season Payment Matrix</h3>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
+                    <thead><tr><th style={{textAlign:'left', padding:'10px'}}>Player</th>{[12,13,14,15,16,17,18].map(w => <th key={w} style={{padding:'10px'}}>W{w}</th>)}</tr></thead>
+                    <tbody>
+                      {leaders.map(player => (
+                        <tr key={player.userId} style={{ borderTop: '1px solid #444' }}>
+                          <td style={{ padding: '10px', fontWeight: 'bold' }}>{getDisplayName(player)}</td>
+                          {[12,13,14,15,16,17,18].map(w => {
+                            const isPaid = player[`paid_week${w}`] === true;
+                            return (
+                              <td key={w} style={{ textAlign: 'center', padding: '10px' }}>
+                                <button onClick={() => toggleWeekPayment(player.userId, w, isPaid)} style={{ cursor: 'pointer', border: 'none', borderRadius: '5px', padding: '5px 10px', backgroundColor: isPaid ? '#28a745' : '#555', color: 'white' }}>{isPaid ? '$' : '-'}</button>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>✍️ Admin Pick Entry</h3>
+                  <div style={{ marginBottom: '15px' }}>
+                      <select onChange={(e) => {
+                          const userObj = leaders.find(l => l.userId === e.target.value);
+                          setAdminTargetUser(userObj);
+                          if (userObj) {
+                            setAdminTargetPicks(userObj[`week${currentWeek}`] || {});
+                            setAdminTargetTiebreaker(userObj.tiebreaker || "");
+                          } else { setAdminTargetPicks({}); setAdminTargetTiebreaker(""); }
+                      }} style={{ padding: '10px', borderRadius: '5px', width: '100%' }}>
+                          <option value="">-- Select Player --</option>
+                          {leaders.map(p => <option key={p.userId} value={p.userId}>{getDisplayName(p)}</option>)}
+                      </select>
+                  </div>
+                  
+                  {adminTargetUser && (
+                      <>
+                          <p style={{ fontWeight: 'bold', color: '#28a745', textAlign: 'center' }}>Editing Picks for: {getDisplayName(adminTargetUser)}</p>
+                          {renderPicksGrid(adminTargetPicks, setAdminTargetPicks, adminTargetTiebreaker, setAdminTargetTiebreaker, true)}
+                          <button onClick={submitAdminPicks} style={{ marginTop: '20px', padding: '15px', backgroundColor: '#28a745', color: 'white', width: '100%', border: 'none', borderRadius: '5px' }}>Submit for {getDisplayName(adminTargetUser)}</button>
+                      </>
+                  )}
+                </div>
+
+                {/* Guest List (Omitted for space, functionality preserved) */}
               </div>
             )}
           </div>
