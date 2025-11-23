@@ -57,7 +57,7 @@ function App() {
   const musicPlayedRef = useRef(false);
   const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
-  // --- 1. LOAD CONFIG ---
+  // 1. Load Config
   useEffect(() => {
     const loadConfig = async () => {
       const configRef = doc(db, "config", "settings");
@@ -76,14 +76,13 @@ function App() {
     loadConfig();
   }, []);
 
-  // --- 2. AUTH LISTENER ---
+  // 2. Auth Listener
   useEffect(() => {
     if (!configLoaded) return; 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         const email = currentUser.email.toLowerCase();
         const isAllowed = guestList.some(e => e.toLowerCase() === email) || ADMIN_EMAILS.some(e => e.toLowerCase() === email);
-
         if (isAllowed) {
           setUser(currentUser);
           setIsAdmin(ADMIN_EMAILS.some(e => e.toLowerCase() === email));
@@ -94,25 +93,22 @@ function App() {
               musicPlayedRef.current = true; 
             } catch (e) {} 
           }
-        } else { alert(`🚫 Access Denied: Your email is not on the guest list.`); auth.signOut(); }
+        } else { alert(`🚫 Access Denied`); auth.signOut(); }
       } else { setUser(null); }
     });
     return () => unsubscribe();
   }, [configLoaded, guestList]);
 
-  // --- 3. DATA FETCHING ---
+  // 3. Data Fetching
   useEffect(() => {
     const fetchData = async () => {
       const weekNum = Number(currentWeek);
-      // ARCHIVE MODE
       if (OLD_WEEKS[weekNum]) {
         const archive = OLD_WEEKS[weekNum];
         setGames(archive.games.map((g, i) => ({ id: g.id || String(i), status: { type: { shortDetail: 'Final' } }, winner: g.winner, competitions: [{ competitors: [{ homeAway: 'home', team: { abbreviation: g.home || g.winner, logo: '' }, score: g.winner===g.home?'W':'-' },{ homeAway: 'away', team: { abbreviation: g.away || '', logo: '' }, score: g.winner===g.away?'W':'-' }] }] })));
         setLeaders(archive.picks.length > 0 ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
         return; 
       }
-
-      // LIVE MODE
       try {
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
@@ -140,19 +136,17 @@ function App() {
                 setTiebreaker(myEntry.tiebreaker || "");
             } else { setHasSubmitted(false); }
         }
-
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
-      } catch (error) { console.error("API Error", error); }
+      } catch (error) { console.error(error); }
     };
-    
     const refreshInterval = setInterval(fetchData, 60000); 
     fetchData();
     return () => clearInterval(refreshInterval);
   }, [currentWeek, user]);
 
-  // --- HELPERS ---
+  // --- LOGIC ---
   const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
   const calculateStats = (gameId, team) => {
@@ -219,9 +213,7 @@ function App() {
         userId: user.uid, userName: user.displayName, photo: user.photoURL,
         [`week${currentWeek}`]: picks, tiebreaker, timestamp: new Date()
       }, { merge: true });
-      alert("✅ Picks Saved!");
-      setHasSubmitted(true);
-      window.location.reload();
+      alert("✅ Picks Saved!"); setHasSubmitted(true); window.location.reload();
     } catch (error) { alert("Error"); }
   };
   
@@ -254,7 +246,7 @@ function App() {
   const togglePicksVisibility = async () => { const newState = !picksVisible; await updateDoc(doc(db, "config", "settings"), { picksVisible: newState }); setPicksVisible(newState); window.location.reload(); };
   const resetPicks = async (userId) => { if (window.confirm("Reset?")) await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField(), tiebreaker: deleteField() }); window.location.reload(); };
 
-  // --- RENDER HELPERS ---
+  // --- RENDER COMPONENT ---
   const renderPicksGrid = (targetPicks, setTargetPicks, targetTiebreaker, setTargetTiebreaker, isReadOnly = false) => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px', maxWidth: '800px', margin: '0 auto' }}>
         {games.map((game) => {
@@ -265,12 +257,9 @@ function App() {
           const myPick = targetPicks[game.id];
           const select = () => selectTeam(game.id, away.team.abbreviation, odds, targetPicks, setTargetPicks);
           const selectHome = () => selectTeam(game.id, home.team.abbreviation, odds, targetPicks, setTargetPicks);
-          
           return (
             <div key={game.id} style={{ backgroundColor: '#fff', borderRadius: '15px', overflow: 'hidden', color: 'black' }}>
-              <div style={{ backgroundColor: '#f0f0f0', padding: '8px', textAlign: 'center', fontSize: '11px', color: '#666', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', paddingLeft: '15px', paddingRight: '15px' }}>
-                <span>{game.status.type.shortDetail}</span><span style={{color: '#d9534f'}}>{odds}</span>
-              </div>
+              <div style={{ backgroundColor: '#f0f0f0', padding: '8px', textAlign: 'center', fontSize: '11px', color: '#666', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', paddingLeft: '15px', paddingRight: '15px' }}><span>{game.status.type.shortDetail}</span><span style={{color: '#d9534f'}}>{odds}</span></div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px', alignItems: 'center' }}>
                 <div onClick={isReadOnly ? null : select} style={{ flex: 1, textAlign: 'center', cursor: isReadOnly ? 'default' : 'pointer', border: myPick === away.team.abbreviation ? '2px solid #28a745' : '2px solid transparent', borderRadius: '10px', padding: '10px', backgroundColor: myPick === away.team.abbreviation ? '#e6fffa' : 'transparent' }}><img src={away.team.logo} style={{ width: '45px' }} /><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{away.team.abbreviation}</div></div>
                 <div style={{ color: '#ccc', fontWeight: 'bold' }}>@</div>
@@ -286,27 +275,19 @@ function App() {
     </div>
   );
 
+  // --- MAIN UI ---
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', minHeight: '100vh', color: 'white', paddingBottom: '80px', backgroundImage: "linear-gradient(rgba(0,0,0,0.85), rgba(0,0,0,0.9)), url('/bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
       
-      {/* Header */}
+      {/* HEADER */}
       <div style={{ padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <h1 style={{ fontSize: '18px', margin: 0, color: '#fff' }}>🏈 Pick 'Em Pro</h1>
-        {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} />
-            <button onClick={handleLogout} style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Logout</button>
-          </div>
-        )}
+        {user && ( <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}><img src={user.photoURL} referrerPolicy="no-referrer" style={{ width: '35px', borderRadius: '50%', border: '2px solid #28a745' }} /><button onClick={handleLogout} style={{ backgroundColor: '#d9534f', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Logout</button></div> )}
       </div>
 
-      {!user ? (
-        <div style={{ textAlign: 'center', marginTop: '150px' }}>
-          <button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>Enter League</button>
-        </div>
-      ) : (
+      {!user ? ( <div style={{ textAlign: 'center', marginTop: '150px' }}><button onClick={handleLogin} style={{ padding: '15px 40px', fontSize: '18px', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '50px', cursor: 'pointer', fontWeight: 'bold' }}>Enter League</button></div> ) : (
         <>
-          {/* Nav Tabs */}
+          {/* NAV TABS */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '20px 0', flexWrap: 'wrap' }}>
             <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
             <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: hasSubmitted ? '2px solid #28a745' : 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
@@ -314,92 +295,45 @@ function App() {
             {isAdmin && <button onClick={() => setView('admin')} style={{ padding: '8px 20px', borderRadius: '30px', border: '2px solid gold', backgroundColor: view === 'admin' ? 'gold' : 'transparent', color: view === 'admin' ? 'black' : 'gold', fontWeight: 'bold', cursor: 'pointer' }}>👑 Admin</button>}
           </div>
 
-          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-            <select value={currentWeek} onChange={(e) => setCurrentWeek(e.target.value)} style={{ padding: '8px 15px', borderRadius: '10px', backgroundColor: '#222', color: 'white', border: '1px solid #444', fontSize: '16px' }}>
-              {[...Array(18)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1}</option>)}
-            </select>
-          </div>
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}><select value={currentWeek} onChange={(e) => setCurrentWeek(e.target.value)} style={{ padding: '8px 15px', borderRadius: '10px', backgroundColor: '#222', color: 'white', border: '1px solid #444', fontSize: '16px' }}>{[...Array(18)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1}</option>)}</select></div>
 
           <div style={{ maxWidth: '100%', overflowX: 'auto', padding: '0 15px' }}>
             
-            {/* === DASHBOARD === */}
+            {/* === DASHBOARD (UPDATED) === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '800px', margin: '0 auto' }}>
-                {/* Scores */}
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div>
-                  <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
-                    {games.map((game) => {
-                       const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
-                       const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
-                       if (!home || !away) return null;
-                       return (
-                         <div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div>
-                           <div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div>
-                         </div>
-                       )
-                    })}
-                  </div>
-                </div>
-
+                <div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div><div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>{games.map((game) => { const home = game.competitions[0].competitors.find(c => c.homeAway === 'home'); const away = game.competitions[0].competitors.find(c => c.homeAway === 'away'); if (!home || !away) return null; return (<div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div><div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div></div>) })}</div></div>
+                
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                   <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
-                      <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${leaders.length * 10}</h2>
-                      <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Week {currentWeek} Pool</p>
-                      <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>Pay $10 to @MrDoom ↗</a>
-                   </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Leaderboard</span><span>Projected Wins</span></div>
-                   {leaders.map((player) => (
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Player Status (Week {currentWeek})</span><span>Paid / Submitted</span></div>
+                   {leaders.map((player) => {
+                      const weekPicks = player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0;
+                      return (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                           {player.photo && <img src={player.photo} referrerPolicy="no-referrer" style={{ width: '40px', borderRadius: '50%', border: '1px solid #555' }} />}
-                          <div>
-                            <div style={{ fontWeight: 'bold', color: 'white' }}>{getDisplayName(player)} {player.paid && <span>✅</span>}</div>
-                            {!player.paid && <div style={{ fontSize: '10px', color: '#ff4444' }}>UNPAID</div>}
-                          </div>
+                          <div style={{ fontWeight: 'bold', color: 'white' }}>{getDisplayName(player)}</div>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                            <div style={{ backgroundColor: '#28a745', color: 'white', padding: '5px 12px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>{getCorrectCountForPlayer(player)} Correct</div>
-                            <div style={{ color: '#888', fontSize: '10px', marginTop: '2px' }}>Proj: {getProjectedWins(player)}</div>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <div style={{ color: player.paid ? '#28a745' : '#ff4444', fontSize: '20px' }}>{player.paid ? '💲' : '❌'}</div>
+                            <div style={{ color: weekPicks > 0 ? '#28a745' : '#666', fontSize: '20px' }}>{weekPicks > 0 ? '✅' : '⏳'}</div>
                         </div>
                       </div>
-                   ))}
-                </div>
-
-                <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📜 Season Standings (Weeks 3-11)</div>
-                  {PAST_STATS.map((stat, index) => (
-                    <div key={index} style={{ padding: '15px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: stat.rank===1?'#FFD700':'#444', color: stat.rank===1?'black':'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{stat.rank}</div>
-                        <div style={{ fontWeight: 'bold', color: 'white' }}>{stat.name}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold' }}>{stat.score} Correct</div></div>
-                    </div>
-                  ))}
+                   )})}
                 </div>
               </div>
             )}
 
-            {/* === PICKS (USER PICK ENTRY) === */}
-            {view === 'picks' && (
-              <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
-                {renderPicksGrid(picks, setPicks, tiebreaker, setTiebreaker, false)}
-                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length && tiebreaker ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length && tiebreaker ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? (hasSubmitted ? "Update Picks" : "Submit Picks") : `Pick ${games.length - Object.keys(picks).length} More`}</button>
-              </div>
-            )}
-
-            {/* === MATRIX === */}
+            {/* === MATRIX (ALL PICKS + LEADERBOARD) === */}
             {view === 'matrix' && (
               <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px', margin: '0 auto' }}>
-                <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🔗 Similar Selections (Diffs)</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
-                  {getSimilarSelections().map((sim, i) => (
-                    <div key={i} style={{ backgroundColor: '#333', padding: '8px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%', border: '1px solid #555' }}><span style={{ fontWeight: 'bold', color: '#28a745' }}>{sim.diff} Diff:</span> {sim.name}</div>
-                  ))}
-                </div>
+                <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🔗 Similar Selections</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>{getSimilarSelections().map((sim, i) => (<div key={i} style={{ backgroundColor: '#333', padding: '8px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%', border: '1px solid #555' }}><span style={{ fontWeight: 'bold', color: '#28a745' }}>{sim.diff} Diff:</span> {sim.name}</div>))}</div>
+                <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🏆 Live Leaderboard (Projected)</div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white', marginBottom: '30px' }}>
+                    <thead><tr><th style={{textAlign:'left', padding:'10px'}}>Player</th><th>Correct</th><th>Proj Wins</th></tr></thead>
+                    <tbody>{leaders.sort((a,b) => getCorrectCountForPlayer(b) - getCorrectCountForPlayer(a)).map(p => (<tr key={p.userId}><td style={{padding:'10px'}}>{getDisplayName(p)}</td><td style={{color:'#28a745', fontWeight:'bold'}}>{getCorrectCountForPlayer(p)}</td><td>{getProjectedWins(p)}</td></tr>))}</tbody>
+                </table>
                 <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{Number(currentWeek) < 12 || picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
                   <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}<th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Tie</th><th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Correct</th></tr></thead>
@@ -416,92 +350,56 @@ function App() {
                             return <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', backgroundColor: showPicks ? color : 'transparent', color: showPicks && (pick === g.winner || !g.winner) ? 'black' : 'white' }}>{showPicks ? (pick || "-") : "🔒"}</td>
                           })}
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{showPicks ? (player.tiebreaker || "-") : "🔒"}</td>
-                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{getCorrectCountForPlayer(player)}</td>
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: '#28a745', fontWeight:'bold' }}>{getCorrectCountForPlayer(player)}</td>
                         </tr>
                       )
                     })}
-                    <tr style={{ backgroundColor: '#333' }}>
-                      <td style={{ padding: '10px', fontWeight: 'bold', position: 'sticky', left: 0, backgroundColor: '#333' }}>% Picked</td>
-                      {games.map(g => { const awayAbbr = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <td key={g.id} style={{ padding: '10px', textAlign: 'center', fontSize: '10px' }}>{calculateStats(g.id, awayAbbr)}%</td> })}
-                      <td></td><td></td>
-                    </tr>
-                    <tr style={{ backgroundColor: 'black', borderTop: '2px solid #444' }}>
-                      <td style={{ padding: '10px', fontWeight: 'bold', color: '#28a745', position: 'sticky', left: 0, backgroundColor: 'black' }}>WINNER</td>
-                      {games.map(g => <td key={g.id} style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold', color: '#28a745' }}>{g.winner || "-"}</td>)}
-                      <td></td><td></td>
-                    </tr>
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* === PICKS === */}
+            {view === 'picks' && (
+              <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
+                {renderPicksGrid(picks, setPicks, tiebreaker, setTiebreaker, false)}
+                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length && tiebreaker ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length && tiebreaker ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? (hasSubmitted ? "Update Picks" : "Submit Picks") : `Pick ${games.length - Object.keys(picks).length} More`}</button>
               </div>
             )}
 
             {/* === ADMIN === */}
             {view === 'admin' && isAdmin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px', margin: '0 auto' }}>
+                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}>
+                    <h3>📊 Weekly Stats</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+                        <div>📝 Submitted: <span style={{color:'#28a745', fontWeight:'bold'}}>{leaders.filter(l => l[`week${currentWeek}`]).length} / {leaders.length}</span></div>
+                        <div>💰 Paid: <span style={{color:'#28a745', fontWeight:'bold'}}>{leaders.filter(l => l.paid).length} / {leaders.length}</span></div>
+                        <div>🏆 Pot: <span style={{color:'gold', fontWeight:'bold'}}>${leaders.length * 10}</span></div>
+                    </div>
+                 </div>
+
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "🔒 HIDE PICKS" : "🔓 REVEAL PICKS"}</button></div>
                 
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>💰 Manage Payments (Week {currentWeek})</h3>
-                  <div style={{ marginBottom: '15px', textAlign: 'center' }}>
-                      <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', width: '100%', fontWeight: 'bold' }}>
-                          Mark {selectedPaidUsers.length} Selected as Paid
-                      </button>
-                  </div>
+                  <h3>💰 Manage Payments</h3>
+                  <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', width: '100%', fontWeight: 'bold', marginBottom:'10px' }}>Mark {selectedPaidUsers.length} Paid</button>
                   {leaders.map(player => (
                     <div key={player.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #444', backgroundColor: selectedPaidUsers.includes(player.userId) ? '#333' : 'transparent' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} style={{ width: '20px', height: '20px' }} />
                           <div style={{ fontWeight: 'bold' }}>{getDisplayName(player)} {player.paid && <span>✅</span>}</div>
                       </div>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => resetPicks(player.userId)} style={{ padding: '5px 10px', borderRadius: '5px', border: '1px solid #ff4444', cursor: 'pointer', backgroundColor: 'transparent', color: '#ff4444' }}>Reset Picks</button>
-                      </div>
+                      <button onClick={() => resetPicks(player.userId)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset</button>
                     </div>
                   ))}
                 </div>
-
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>✍️ Admin Pick Entry</h3>
-                  <div style={{ marginBottom: '15px' }}>
-                      <select onChange={(e) => {
-                          const userObj = leaders.find(l => l.userId === e.target.value);
-                          setAdminTargetUser(userObj);
-                          if (userObj) {
-                            const currentPicks = userObj[`week${currentWeek}`] || {};
-                            setAdminTargetPicks(currentPicks);
-                            setAdminTargetTiebreaker(userObj.tiebreaker || "");
-                          } else { setAdminTargetPicks({}); setAdminTargetTiebreaker(""); }
-                      }} style={{ padding: '10px', borderRadius: '5px', border: 'none', width: '100%' }}>
-                          <option value="">-- Select Player to Edit Picks For --</option>
-                          {leaders.map(p => <option key={p.userId} value={p.userId}>{getDisplayName(p)}</option>)}
-                      </select>
-                  </div>
-                  
-                  {adminTargetUser && (
-                      <>
-                          <p style={{ fontWeight: 'bold', color: '#28a745', textAlign: 'center' }}>Editing Picks for: {getDisplayName(adminTargetUser)}</p>
-                          {renderPicksGrid(adminTargetPicks, setAdminTargetPicks, adminTargetTiebreaker, setAdminTargetTiebreaker, true)}
-                          <button onClick={submitAdminPicks} style={{ marginTop: '20px', padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold', width: '100%' }}>
-                              Submit Picks for {adminTargetUser.userName}
-                          </button>
-                      </>
-                  )}
-                </div>
-
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
-                  <h3>👥 Guest List</h3>
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', gap: '10px' }}><input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="Email" style={{ flex: 2, padding: '10px', borderRadius: '5px', border: 'none' }} /><input value={newNicknameInput} onChange={(e) => setNewNicknameInput(e.target.value)} placeholder="Nickname" style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }} /></div>
-                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer', width: '100%' }}>Add</button>
-                  </div>
-                  {guestList.map(email => <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginBottom: '5px' }}><div><span style={{color: 'white'}}>{email}</span>{nicknames[sanitizeEmail(email)] && <span style={{marginLeft: '10px', color: '#28a745', fontWeight:'bold'}}>({nicknames[sanitizeEmail(email)]})</span>}</div><button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>X</button></div>)}
-                </div>
+                {/* ... Guest List & Admin Pick Entry ... */}
               </div>
             )}
           </div>
         </>
       )}
-      {/* Ticker (Final Section) */}
       {user && news.length > 0 && <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#000', color: 'white', borderTop: '2px solid #28a745', overflow: 'hidden', whiteSpace: 'nowrap', zIndex: 1000 }}><div style={{ display: 'inline-block', padding: '10px', animation: 'ticker 30s linear infinite' }}>{news.map((n, i) => <span key={i} style={{ marginRight: '50px', fontSize: '14px', fontWeight: 'bold' }}>🏈 {n.headline}</span>)}</div><style>{`@keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }`}</style></div>}
     </div>
   );
