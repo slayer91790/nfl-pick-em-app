@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { signInWithGoogle, db, auth } from './firebase';
-import { doc, setDoc, collection, getDocs, updateDoc, deleteField, getDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, updateDoc, deleteField, getDoc, arrayUnion, arrayRemove, writeBatch } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// ==========================================
-// 🔒 CONFIG & DATA
-// ==========================================
+// --- CONFIG & DATA ---
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com", "antoniodanielvazquez@gmail.com", "crazynphat13@gmail.com", "friend1@example.com"
 ];
@@ -58,15 +56,27 @@ function App() {
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
   const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
-  // --- 1. LOAD CONFIG & LOGIN LISTENER ---
+  // 1. Load Config (UNCHANGED)
   useEffect(() => {
-    const loadConfig = async () => { /* ... */ };
+    const loadConfig = async () => {
+      const configRef = doc(db, "config", "settings");
+      const docSnap = await getDoc(configRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setGuestList(data.allowedEmails || []);
+        setNicknames(data.nicknames || {});
+        setPicksVisible(data.picksVisible || false); 
+      } else {
+        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, picksVisible: false });
+        setGuestList([...ALLOWED_EMAILS]);
+      }
+    };
     loadConfig();
   }, []);
 
+  // 2. Login Listener (UNCHANGED)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // Logic from your feedback: MUST check state here!
       if (currentUser) {
         const email = currentUser.email.toLowerCase();
         const isAllowed = guestList.some(e => e.toLowerCase() === email) || ADMIN_EMAILS.some(e => e.toLowerCase() === email);
@@ -74,52 +84,210 @@ function App() {
         if (isAllowed) {
           setUser(currentUser);
           setIsAdmin(ADMIN_EMAILS.some(e => e.toLowerCase() === email));
-        } else { 
-          alert(`🚫 Access Denied: ${currentUser.email} is not on the guest list.`); 
-          auth.signOut(); 
-        }
-      } else { 
-        setUser(null); 
-        setIsAdmin(false);
-      }
+        } else { alert(`🚫 Access Denied: Your email is not on the guest list.`); auth.signOut(); }
+      } else { setUser(null); }
     });
     return () => unsubscribe();
   }, [guestList]);
 
   // 3. Data Fetching (With Auto-Refresh)
-  useEffect(() => { /* ... */ }, [currentWeek, user]);
+  useEffect(() => {
+    const fetchData = async () => {
+      const weekNum = Number(currentWeek);
 
-  // --- LOGIC & HELPERS ---
-  const getCellColor = (pick, winner) => { /* ... */ return pick === winner ? '#28a745' : '#d9534f'; };
-  const getDisplayName = (player) => { /* ... */ return player.userName; };
-  const calculateStats = (gameId, team) => { /* ... */ return Math.round((pickCount / leaders.length) * 100); };
-  
-  // --- ACTIONS ---
-  // MODIFIED: Button now updates state directly from async result.
-  const handleLogin = async () => {
-    try {
-      const result = await signInWithGoogle();
-      if (result && result.user) {
-        // User is signed in. State listener will handle the rest.
-        // We do nothing here, the useEffect handles the setUser() and validation.
-      } else if (result === null) {
-        // The error handling inside firebase.js already showed an alert.
+      // ARCHIVE MODE
+      if (OLD_WEEKS[weekNum]) {
+        const archive = OLD_WEEKS[weekNum];
+        setGames(archive.games.map((g, i) => ({ id: g.id || String(i), status: { type: { shortDetail: 'Final' } }, winner: g.winner, competitions: [{ competitors: [{ homeAway: 'home', team: { abbreviation: g.home || g.winner, logo: '' }, score: g.winner===g.home?'W':'-' },{ homeAway: 'away', team: { abbreviation: g.away || '', logo: '' }, score: g.winner===g.away?'W':'-' }] }] })));
+        setLeaders(archive.picks.length > 0 ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
+        return; 
       }
-    } catch (e) {
-      console.error("Manual sign-in failure:", e);
-    }
+
+      // LIVE MODE
+      try {
+        const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
+        const gamesData = await gamesRes.json();
+        
+        const processedGames = (gamesData.events || []).map(g => {
+            const winner = g.competitions[0].competitors.find(c => c.winner === true)?.team.abbreviation;
+            return { ...g, winner };
+        });
+        setGames(processedGames);
+        
+        const querySnapshot = await getDocs(collection(db, "picks_2025"));
+        const loadedLeaders = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.paid === undefined) data.paid = false;
+          loadedLeaders.push(data);
+        });
+        setLeaders(loadedLeaders);
+
+        const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
+        const newsData = await newsRes.json();
+        setNews(newsData.articles || []);
+      } catch (error) { console.error("API Fetch Error:", error); }
+    };
+    
+    const refreshInterval = setInterval(fetchData, 60000); 
+    fetchData();
+
+    return () => clearInterval(refreshInterval);
+  }, [currentWeek, user]);
+
+  // --- LOGIC ---
+  const getCellColor = (pick, winner) => {
+    if (!pick) return '#666'; 
+    if (!winner) return '#fff'; 
+    return pick === winner ? '#28a745' : '#d9534f'; 
+  };
+  const getDisplayName = (player) => { return player.userName; };
+  const calculateStats = (gameId, team) => {
+    if (!leaders.length) return 0;
+    let pickCount = 0;
+    leaders.forEach((player) => {
+        const weekPicks = player[`week${currentWeek}`] || {};
+        if (weekPicks[gameId] === team) pickCount += 1;
+    });
+    return Math.round((pickCount / leaders.length) * 100);
   };
   
+  // 🟢 NEW: Count Correct Picks Helper
+  const getCorrectCountForPlayer = (player) => {
+    const weekKey = `week${currentWeek}`;
+    const userPicks = player[weekKey] || {};
+    let correct = 0;
+
+    games.forEach((game) => {
+      const winner = game.winner;
+      if (!winner) return;
+
+      const pick = userPicks[game.id];
+      if (pick && pick === winner) {
+        correct++;
+      }
+    });
+
+    return correct;
+  };
+
+  // --- ACTIONS ---
+  const handleLogin = () => signInWithGoogle();
   const handleLogout = () => { auth.signOut(); window.location.reload(); };
-  const selectTeam = (gameId, teamAbbr, oddsString, targetPicksState, setTargetPicksState) => { /* ... */ };
-  const submitPicks = async () => { /* ... */ };
-  const toggleSelectUser = (userId) => { /* ... */ };
-  const markSelectedPaid = async () => { /* ... */ };
-  const submitAdminPicks = async () => { /* ... */ };
-  const addGuest = async () => { /* ... */ };
-  const removeGuest = async (email) => { /* ... */ };
-  const togglePicksVisibility = async () => { /* ... */ };
-  const resetPicks = async (userId) => { /* ... */ };
+
+  const selectTeam = (gameId, teamAbbr, oddsString, targetPicksState, setTargetPicksState) => {
+    const setPicksFunc = setTargetPicksState || setPicks;
+    setPicksFunc((prev) => ({ ...prev, [gameId]: teamAbbr }));
+    
+    if (oddsString && (oddsString.includes('+') || oddsString.includes('-'))) {
+      const match = oddsString.match(/([A-Z]{2,3})\s*([+-]?)(\d+\.?\d*)/); 
+      
+      if (match) {
+        const [full, teamInOdds, sign, num] = match;
+        const magnitude = parseFloat(num);
+        
+        if (magnitude >= 8) {
+            if ((sign === '-' && teamAbbr !== teamInOdds) || (sign === '+' && teamAbbr === teamInOdds)) { 
+                const randomIndex = Math.floor(Math.random() * funnySounds.length);
+                const soundToPlay = funnySounds[randomIndex];
+                try { soundToPlay.currentTime = 0; soundToPlay.play(); } catch(e) {}
+            }
+        }
+      }
+    }
+  };
+
+  const submitPicks = async () => {
+    if (!user) return;
+    if (Object.keys(picks).length < games.length) { alert(`Incomplete Picks!`); return; }
+    if (!tiebreaker) { alert("Please enter a Tiebreaker Score"); return; }
+    try {
+      await setDoc(doc(db, "picks_2025", user.uid), {
+        userId: user.uid, userName: user.displayName, photo: user.photoURL,
+        [`week${currentWeek}`]: picks, tiebreaker, timestamp: new Date()
+      }, { merge: true });
+      alert("✅ Picks Saved!");
+      window.location.reload();
+    } catch (error) { alert("Error"); }
+  };
+  
+  // --- ADMIN ACTIONS ---
+  const toggleSelectUser = (userId) => {
+    setSelectedPaidUsers(prev => 
+      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const markSelectedPaid = async () => {
+    if (selectedPaidUsers.length === 0) return;
+    if (!window.confirm(`Mark ${selectedPaidUsers.length} users as Paid for Week ${currentWeek}?`)) return;
+
+    try {
+      const batch = writeBatch(db);
+      for (const userId of selectedPaidUsers) {
+        const userRef = doc(db, "picks_2025", userId);
+        batch.update(userRef, { paid: true });
+      }
+      await batch.commit();
+      alert(`✅ ${selectedPaidUsers.length} users marked as paid!`);
+      setSelectedPaidUsers([]);
+      window.location.reload(); 
+    } catch (error) {
+      console.error("Batch update failed:", error);
+      alert("Error marking users as paid.");
+    }
+  };
+
+  const submitAdminPicks = async () => {
+    if (!adminTargetUser) { alert("Please select a user."); return; }
+    if (Object.keys(adminTargetPicks).length < games.length) { alert(`Incomplete Picks for ${adminTargetUser.userName}!`); return; }
+    if (!adminTargetTiebreaker) { alert("Please enter a Tiebreaker Score"); return; }
+    
+    if (!window.confirm(`SUBMIT PICKS for ${adminTargetUser.userName} for Week ${currentWeek}?`)) return;
+
+    try {
+      await setDoc(doc(db, "picks_2025", adminTargetUser.userId), {
+        userId: adminTargetUser.userId, userName: adminTargetUser.userName, photo: adminTargetUser.photo,
+        [`week${currentWeek}`]: adminTargetPicks, tiebreaker: adminTargetTiebreaker, timestamp: new Date()
+      }, { merge: true });
+      alert(`✅ Picks Saved for ${adminTargetUser.userName}!`);
+      window.location.reload();
+    } catch (error) { 
+      alert("Error submitting admin picks."); 
+    }
+  };
+
+  const addGuest = async () => {
+    if (!newEmailInput) return;
+    const email = newEmailInput.toLowerCase().trim();
+    const nickname = newNicknameInput.trim();
+    const configRef = doc(db, "config", "settings");
+    await updateDoc(configRef, { allowedEmails: arrayUnion(email), [`nicknames.${sanitizeEmail(email)}`]: nickname });
+    setGuestList(prev => [...prev, email]);
+    setNicknames(prev => ({ ...prev, [sanitizeEmail(email)]: nickname }));
+    setNewEmailInput(""); setNewNicknameInput("");
+    alert(`✅ Added ${email}`);
+  };
+
+  const removeGuest = async (email) => {
+    if (!window.confirm(`Remove ${email}?`)) return;
+    const configRef = doc(db, "config", "settings");
+    await updateDoc(configRef, { allowedEmails: arrayRemove(email) });
+    setGuestList(prev => prev.filter(e => e !== email));
+  };
+
+  const togglePicksVisibility = async () => {
+    const newState = !picksVisible;
+    await updateDoc(doc(db, "config", "settings"), { picksVisible: newState });
+    setPicksVisible(newState);
+    window.location.reload();
+  };
+
+  const resetPicks = async (userId) => {
+    if (!window.confirm(`Are you sure? This will DELETE picks for Week ${currentWeek}.`)) return;
+    await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField(), tiebreaker: deleteField() });
+    window.location.reload(); 
+  };
 
   // --- RENDER FUNCTION COMPONENT ---
   const renderPicksGrid = (targetPicks, setTargetPicks, targetTiebreaker, setTargetTiebreaker, isReadOnly = false) => (
@@ -193,12 +361,19 @@ function App() {
             {/* === DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '800px', margin: '0 auto' }}>
+                {/* Scores */}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div>
                   <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
-                    {games.map((game) => { /* ... */ return (
+                    {games.map((game) => {
+                       const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
+                       const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
+                       if (!home || !away) return null;
+                       return (
                          <div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}>
-                           {/* ... Score rendering ... */}
+                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div>
+                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div>
+                           <div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div>
                          </div>
                        )
                     })}
@@ -251,12 +426,111 @@ function App() {
               </div>
             )}
 
-            {/* === MATRIX & ADMIN VIEWS === */}
-            {/* ... (Omitted for brevity) ... */}
+            {/* === MATRIX === */}
+            {view === 'matrix' && (
+              <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px', margin: '0 auto' }}>
+                <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{Number(currentWeek) < 12 || picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
+                  <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}<th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Tie</th><th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Correct</th></tr></thead>
+                  <tbody>
+                    {leaders.map(player => {
+                      const playerPicks = player[`week${currentWeek}`] || {};
+                      const showPicks = Number(currentWeek) < 12 ? true : (picksVisible || isAdmin || player.userId === user.uid);
+                      return (
+                        <tr key={player.userId}>
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', fontWeight: 'bold', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>{getDisplayName(player)}</td>
+                          {games.map(g => {
+                            const pick = playerPicks[g.id];
+                            const color = Number(currentWeek) < 12 ? getCellColor(pick, g.winner) : (showPicks && pick ? (g.winner ? getCellColor(pick, g.winner) : 'white') : '#666');
+                            return <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', backgroundColor: showPicks ? color : 'transparent', color: showPicks && (pick === g.winner || !g.winner) ? 'black' : 'white' }}>{showPicks ? (pick || "-") : "🔒"}</td>
+                          })}
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{showPicks ? (player.tiebreaker || "-") : "🔒"}</td>
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{getCorrectCountForPlayer(player)}</td>
+                        </tr>
+                      )
+                    })}
+                    <tr style={{ backgroundColor: '#333' }}>
+                      <td style={{ padding: '10px', fontWeight: 'bold', position: 'sticky', left: 0, backgroundColor: '#333' }}>% Picked</td>
+                      {games.map(g => { const awayAbbr = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <td key={g.id} style={{ padding: '10px', textAlign: 'center', fontSize: '10px' }}>{calculateStats(g.id, awayAbbr)}%</td> })}
+                      <td></td><td></td>
+                    </tr>
+                    <tr style={{ backgroundColor: 'black', borderTop: '2px solid #444' }}>
+                      <td style={{ padding: '10px', fontWeight: 'bold', color: '#28a745', position: 'sticky', left: 0, backgroundColor: 'black' }}>WINNER</td>
+                      {games.map(g => <td key={g.id} style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold', color: '#28a745' }}>{g.winner || "-"}</td>)}
+                      <td></td><td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* === ADMIN === */}
+            {view === 'admin' && isAdmin && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px', margin: '0 auto' }}>
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "🔒 HIDE PICKS" : "🔓 REVEAL PICKS"}</button></div>
+                
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>💰 Manage Payments (Week {currentWeek})</h3>
+                  <div style={{ marginBottom: '15px', textAlign: 'center' }}>
+                      <button onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0} style={{ backgroundColor: selectedPaidUsers.length > 0 ? '#28a745' : '#555', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: selectedPaidUsers.length > 0 ? 'pointer' : 'not-allowed', width: '100%', fontWeight: 'bold' }}>
+                          Mark {selectedPaidUsers.length} Selected as Paid
+                      </button>
+                  </div>
+                  {leaders.map(player => (
+                    <div key={player.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #444', backgroundColor: selectedPaidUsers.includes(player.userId) ? '#333' : 'transparent' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} style={{ width: '20px', height: '20px' }} />
+                          <div style={{ fontWeight: 'bold' }}>{getDisplayName(player)} {player.paid && <span>✅</span>}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button onClick={() => resetPicks(player.userId)} style={{ padding: '5px 10px', borderRadius: '5px', border: '1px solid #ff4444', cursor: 'pointer', backgroundColor: 'transparent', color: '#ff4444' }}>Reset Picks</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>✍️ Admin Pick Entry</h3>
+                  <div style={{ marginBottom: '15px' }}>
+                      <select onChange={(e) => {
+                          const userObj = leaders.find(l => l.userId === e.target.value);
+                          setAdminTargetUser(userObj);
+                          if (userObj) {
+                            const currentPicks = userObj[`week${currentWeek}`] || {};
+                            setAdminTargetPicks(currentPicks);
+                            setAdminTargetTiebreaker(userObj.tiebreaker || "");
+                          } else { setAdminTargetPicks({}); setAdminTargetTiebreaker(""); }
+                      }} style={{ padding: '10px', borderRadius: '5px', border: 'none', width: '100%' }}>
+                          <option value="">-- Select Player to Edit Picks For --</option>
+                          {leaders.map(p => <option key={p.userId} value={p.userId}>{getDisplayName(p)}</option>)}
+                      </select>
+                  </div>
+                  
+                  {adminTargetUser && (
+                      <>
+                          <p style={{ fontWeight: 'bold', color: '#28a745', textAlign: 'center' }}>Editing Picks for: {getDisplayName(adminTargetUser)}</p>
+                          {renderPicksGrid(adminTargetPicks, setAdminTargetPicks, adminTargetTiebreaker, setAdminTargetTiebreaker, true)}
+                          <button onClick={submitAdminPicks} style={{ marginTop: '20px', padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold', width: '100%' }}>
+                              Submit Picks for {getDisplayName(adminTargetUser)}
+                          </button>
+                      </>
+                  )}
+                </div>
+
+                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
+                  <h3>👥 Guest List</h3>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', gap: '10px' }}><input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="Email" style={{ flex: 2, padding: '10px', borderRadius: '5px', border: 'none' }} /><input value={newNicknameInput} onChange={(e) => setNewNicknameInput(e.target.value)} placeholder="Nickname" style={{ flex: 1, padding: '10px', borderRadius: '5px', border: 'none' }} /></div>
+                    <button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer', width: '100%' }}>Add</button>
+                  </div>
+                  {guestList.map(email => <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginBottom: '5px' }}><div><span style={{color: 'white'}}>{email}</span>{nicknames[sanitizeEmail(email)] && <span style={{marginLeft: '10px', color: '#28a745', fontWeight:'bold'}}>({nicknames[sanitizeEmail(email)]})</span>}</div><button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none', cursor: 'pointer' }}>X</button></div>)}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
-      {/* Ticker (Final Section) */}
+      {user && news.length > 0 && <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#000', color: 'white', borderTop: '2px solid #28a745', overflow: 'hidden', whiteSpace: 'nowrap', zIndex: 1000 }}><div style={{ display: 'inline-block', padding: '10px', animation: 'ticker 30s linear infinite' }}>{news.map((n, i) => <span key={i} style={{ marginRight: '50px', fontSize: '14px', fontWeight: 'bold' }}>🏈 {n.headline}</span>)}</div><style>{`@keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }`}</style></div>}
     </div>
   );
 }
