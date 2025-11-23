@@ -27,7 +27,7 @@ const OLD_WEEKS = {
   10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [{ name: "Albert", score: 11, picks: ['DEN','IND','BUF','BAL','NYJ','NE','CAR','HOU','CHI','SEA','LAR','DET','PIT','PHI'] },{ name: "Andy", score: 8, picks: ['DEN','IND','BUF','MIN','CLE','TB','CAR','JAX','CHI','SEA','LAR','DET','LAC','PHI'] },{ name: "Art", score: 7, picks: ['LV','IND','BUF','BAL','CLE','TB','CAR','JAX','CHI','SEA','SF','DET','LAC','PHI'] },{ name: "Louis", score: 9, picks: ['DEN','IND','BUF','MIN','NYJ','NE','CAR','JAX','CHI','SEA','LAR','DET','PIT','PHI'] },{ name: "Luis", score: 8, picks: ['DEN','IND','BUF','MIN','CLE','NE','CAR','JAX','CHI','SEA','LAR','DET','LAC','GB'] },{ name: "Luis Solorio", score: 8, picks: ['DEN','IND','BUF','BAL','CLE','NE','CAR','JAX','CHI','SEA','LAR','DET','LAC','GB'] },{ name: "Omar", score: 7, picks: ['DEN','IND','BUF','BAL','NYJ','TB','CAR','HOU','NYG','ARI','SF','DET','LAC','GB'] },{ name: "Roman", score: 9, picks: ['DEN','IND','BUF','BAL','CLE','TB','CAR','JAX','CHI','SEA','LAR','DET','LAC','PHI'] },{ name: "Tim", score: 5, picks: ['DEN','ATL','BUF','MIN','CLE','TB','NO','HOU','NYG','SEA','SF','DET','PIT','GB'] },{ name: "Tony", score: 7, picks: ['DEN','IND','BUF','MIN','CLE','NE','CAR','JAX','CHI','SEA','LAR','DET','PIT','GB'] }] }
 };
 
-const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3']; // Rotation pool
+const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3'];
 
 function App() {
   const [user, setUser] = useState(null);
@@ -39,8 +39,8 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState(12);
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   
-  // Settings & Admin States
   const [guestList, setGuestList] = useState([]);
   const [nicknames, setNicknames] = useState({});
   const [newEmailInput, setNewEmailInput] = useState("");
@@ -50,13 +50,14 @@ function App() {
   const [adminTargetUser, setAdminTargetUser] = useState(null); 
   const [adminTargetPicks, setAdminTargetPicks] = useState({});
   const [adminTargetTiebreaker, setAdminTargetTiebreaker] = useState("");
+  const [configLoaded, setConfigLoaded] = useState(false);
 
-  // Refs & Audio
   const introRef = useRef(new Audio('/intro.mp3'));
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
+  const musicPlayedRef = useRef(false);
   const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
-  // 1. Load Config (UNCHANGED)
+  // --- 1. LOAD CONFIG ---
   useEffect(() => {
     const loadConfig = async () => {
       const configRef = doc(db, "config", "settings");
@@ -70,12 +71,14 @@ function App() {
         await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, picksVisible: false });
         setGuestList([...ALLOWED_EMAILS]);
       }
+      setConfigLoaded(true);
     };
     loadConfig();
   }, []);
 
-  // 2. Login Listener (UNCHANGED)
+  // --- 2. AUTH LISTENER ---
   useEffect(() => {
+    if (!configLoaded) return; 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         const email = currentUser.email.toLowerCase();
@@ -84,17 +87,23 @@ function App() {
         if (isAllowed) {
           setUser(currentUser);
           setIsAdmin(ADMIN_EMAILS.some(e => e.toLowerCase() === email));
+          if (!musicPlayedRef.current) { 
+            try { 
+              introRef.current.volume = 0.5; 
+              introRef.current.play().catch(() => {}); 
+              musicPlayedRef.current = true; 
+            } catch (e) {} 
+          }
         } else { alert(`🚫 Access Denied: Your email is not on the guest list.`); auth.signOut(); }
       } else { setUser(null); }
     });
     return () => unsubscribe();
-  }, [guestList]);
+  }, [configLoaded, guestList]);
 
-  // 3. Data Fetching (With Auto-Refresh)
+  // --- 3. DATA FETCHING ---
   useEffect(() => {
     const fetchData = async () => {
       const weekNum = Number(currentWeek);
-
       // ARCHIVE MODE
       if (OLD_WEEKS[weekNum]) {
         const archive = OLD_WEEKS[weekNum];
@@ -107,10 +116,10 @@ function App() {
       try {
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
-        
         const processedGames = (gamesData.events || []).map(g => {
             const winner = g.competitions[0].competitors.find(c => c.winner === true)?.team.abbreviation;
-            return { ...g, winner };
+            const odds = g.competitions[0].odds && g.competitions[0].odds[0] ? g.competitions[0].odds[0].details : "";
+            return { ...g, winner, oddsString: odds };
         });
         setGames(processedGames);
         
@@ -123,74 +132,78 @@ function App() {
         });
         setLeaders(loadedLeaders);
 
+        if (user) {
+            const myEntry = loadedLeaders.find(l => l.userId === user.uid);
+            if (myEntry && myEntry[`week${currentWeek}`]) {
+                setHasSubmitted(true);
+                setPicks(myEntry[`week${currentWeek}`]);
+                setTiebreaker(myEntry.tiebreaker || "");
+            } else { setHasSubmitted(false); }
+        }
+
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
-      } catch (error) { console.error("API Fetch Error:", error); }
+      } catch (error) { console.error("API Error", error); }
     };
     
     const refreshInterval = setInterval(fetchData, 60000); 
     fetchData();
-
     return () => clearInterval(refreshInterval);
   }, [currentWeek, user]);
 
-  // --- LOGIC ---
-  const getCellColor = (pick, winner) => {
-    if (!pick) return '#666'; 
-    if (!winner) return '#fff'; 
-    return pick === winner ? '#28a745' : '#d9534f'; 
-  };
-  const getDisplayName = (player) => { return player.userName; };
+  // --- HELPERS ---
+  const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
+  const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
   const calculateStats = (gameId, team) => {
     if (!leaders.length) return 0;
     let pickCount = 0;
-    leaders.forEach((player) => {
-        const weekPicks = player[`week${currentWeek}`] || {};
-        if (weekPicks[gameId] === team) pickCount += 1;
-    });
+    leaders.forEach((player) => { const weekPicks = player[`week${currentWeek}`] || {}; if (weekPicks[gameId] === team) pickCount += 1; });
     return Math.round((pickCount / leaders.length) * 100);
   };
-  
-  // 🟢 NEW: Count Correct Picks Helper
   const getCorrectCountForPlayer = (player) => {
-    const weekKey = `week${currentWeek}`;
-    const userPicks = player[weekKey] || {};
+    const weekPicks = player[`week${currentWeek}`] || {};
     let correct = 0;
-
-    games.forEach((game) => {
-      const winner = game.winner;
-      if (!winner) return;
-
-      const pick = userPicks[game.id];
-      if (pick && pick === winner) {
-        correct++;
-      }
-    });
-
+    games.forEach((game) => { if (game.winner && weekPicks[game.id] === game.winner) correct++; });
     return correct;
+  };
+  const getProjectedWins = (player) => {
+    let score = getCorrectCountForPlayer(player);
+    games.forEach(g => {
+        if (g.status.type.shortDetail !== 'Final' && g.oddsString && g.oddsString.includes('-')) {
+             const favTeam = g.oddsString.split(' ')[0];
+             const weekPicks = player[`week${currentWeek}`] || {};
+             if (weekPicks[g.id] === favTeam) score++;
+        }
+    });
+    return score;
+  };
+  const getSimilarSelections = () => {
+    if (!picks || Object.keys(picks).length === 0) return [];
+    return leaders.filter(p => p.userId !== user.uid).map(player => {
+        const theirPicks = player[`week${currentWeek}`] || {};
+        let diff = 0;
+        games.forEach(g => { if (picks[g.id] && theirPicks[g.id] && picks[g.id] !== theirPicks[g.id]) diff++; });
+        return { name: getDisplayName(player), diff };
+    }).sort((a, b) => a.diff - b.diff);
   };
 
   // --- ACTIONS ---
-  const handleLogin = () => signInWithGoogle();
+  const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
   const handleLogout = () => { auth.signOut(); window.location.reload(); };
 
   const selectTeam = (gameId, teamAbbr, oddsString, targetPicksState, setTargetPicksState) => {
     const setPicksFunc = setTargetPicksState || setPicks;
     setPicksFunc((prev) => ({ ...prev, [gameId]: teamAbbr }));
-    
     if (oddsString && (oddsString.includes('+') || oddsString.includes('-'))) {
       const match = oddsString.match(/([A-Z]{2,3})\s*([+-]?)(\d+\.?\d*)/); 
-      
       if (match) {
         const [full, teamInOdds, sign, num] = match;
         const magnitude = parseFloat(num);
-        
         if (magnitude >= 8) {
             if ((sign === '-' && teamAbbr !== teamInOdds) || (sign === '+' && teamAbbr === teamInOdds)) { 
                 const randomIndex = Math.floor(Math.random() * funnySounds.length);
-                const soundToPlay = funnySounds[randomIndex];
-                try { soundToPlay.currentTime = 0; soundToPlay.play(); } catch(e) {}
+                try { funnySounds[randomIndex].currentTime = 0; funnySounds[randomIndex].play(); } catch(e) {}
             }
         }
       }
@@ -199,105 +212,56 @@ function App() {
 
   const submitPicks = async () => {
     if (!user) return;
-    if (Object.keys(picks).length < games.length) { alert(`Incomplete Picks!`); return; }
-    if (!tiebreaker) { alert("Please enter a Tiebreaker Score"); return; }
+    if (Object.keys(picks).length < games.length) { alert(`Incomplete! ${Object.keys(picks).length}/${games.length} picked.`); return; }
+    if (!tiebreaker) { alert("Enter Tiebreaker Score"); return; }
     try {
       await setDoc(doc(db, "picks_2025", user.uid), {
         userId: user.uid, userName: user.displayName, photo: user.photoURL,
         [`week${currentWeek}`]: picks, tiebreaker, timestamp: new Date()
       }, { merge: true });
       alert("✅ Picks Saved!");
+      setHasSubmitted(true);
       window.location.reload();
     } catch (error) { alert("Error"); }
   };
   
   // --- ADMIN ACTIONS ---
-  const toggleSelectUser = (userId) => {
-    setSelectedPaidUsers(prev => 
-      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
-    );
-  };
-
+  const toggleSelectUser = (userId) => { setSelectedPaidUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]); };
   const markSelectedPaid = async () => {
-    if (selectedPaidUsers.length === 0) return;
-    if (!window.confirm(`Mark ${selectedPaidUsers.length} users as Paid for Week ${currentWeek}?`)) return;
-
+    if (!selectedPaidUsers.length) return;
     try {
       const batch = writeBatch(db);
-      for (const userId of selectedPaidUsers) {
-        const userRef = doc(db, "picks_2025", userId);
-        batch.update(userRef, { paid: true });
-      }
+      selectedPaidUsers.forEach((uid) => { batch.update(doc(db, "picks_2025", uid), { paid: true }); });
       await batch.commit();
-      alert(`✅ ${selectedPaidUsers.length} users marked as paid!`);
-      setSelectedPaidUsers([]);
-      window.location.reload(); 
-    } catch (error) {
-      console.error("Batch update failed:", error);
-      alert("Error marking users as paid.");
-    }
+      alert(`✅ Users Paid!`); setSelectedPaidUsers([]); window.location.reload(); 
+    } catch (e) { alert("Error"); }
   };
-
   const submitAdminPicks = async () => {
-    if (!adminTargetUser) { alert("Please select a user."); return; }
-    if (Object.keys(adminTargetPicks).length < games.length) { alert(`Incomplete Picks for ${adminTargetUser.userName}!`); return; }
-    if (!adminTargetTiebreaker) { alert("Please enter a Tiebreaker Score"); return; }
-    
-    if (!window.confirm(`SUBMIT PICKS for ${adminTargetUser.userName} for Week ${currentWeek}?`)) return;
-
-    try {
-      await setDoc(doc(db, "picks_2025", adminTargetUser.userId), {
+    if (!adminTargetUser) return;
+    await setDoc(doc(db, "picks_2025", adminTargetUser.userId), {
         userId: adminTargetUser.userId, userName: adminTargetUser.userName, photo: adminTargetUser.photo,
         [`week${currentWeek}`]: adminTargetPicks, tiebreaker: adminTargetTiebreaker, timestamp: new Date()
       }, { merge: true });
-      alert(`✅ Picks Saved for ${adminTargetUser.userName}!`);
-      window.location.reload();
-    } catch (error) { 
-      alert("Error submitting admin picks."); 
-    }
+      alert(`✅ Saved for ${adminTargetUser.userName}!`); window.location.reload();
   };
-
   const addGuest = async () => {
     if (!newEmailInput) return;
     const email = newEmailInput.toLowerCase().trim();
-    const nickname = newNicknameInput.trim();
-    const configRef = doc(db, "config", "settings");
-    await updateDoc(configRef, { allowedEmails: arrayUnion(email), [`nicknames.${sanitizeEmail(email)}`]: nickname });
-    setGuestList(prev => [...prev, email]);
-    setNicknames(prev => ({ ...prev, [sanitizeEmail(email)]: nickname }));
-    setNewEmailInput(""); setNewNicknameInput("");
-    alert(`✅ Added ${email}`);
+    await updateDoc(doc(db, "config", "settings"), { allowedEmails: arrayUnion(email), [`nicknames.${sanitizeEmail(email)}`]: newNicknameInput.trim() });
+    alert(`✅ Added ${email}`); window.location.reload();
   };
+  const removeGuest = async (email) => { if (window.confirm("Remove?")) await updateDoc(doc(db, "config", "settings"), { allowedEmails: arrayRemove(email) }); window.location.reload(); };
+  const togglePicksVisibility = async () => { const newState = !picksVisible; await updateDoc(doc(db, "config", "settings"), { picksVisible: newState }); setPicksVisible(newState); window.location.reload(); };
+  const resetPicks = async (userId) => { if (window.confirm("Reset?")) await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField(), tiebreaker: deleteField() }); window.location.reload(); };
 
-  const removeGuest = async (email) => {
-    if (!window.confirm(`Remove ${email}?`)) return;
-    const configRef = doc(db, "config", "settings");
-    await updateDoc(configRef, { allowedEmails: arrayRemove(email) });
-    setGuestList(prev => prev.filter(e => e !== email));
-  };
-
-  const togglePicksVisibility = async () => {
-    const newState = !picksVisible;
-    await updateDoc(doc(db, "config", "settings"), { picksVisible: newState });
-    setPicksVisible(newState);
-    window.location.reload();
-  };
-
-  const resetPicks = async (userId) => {
-    if (!window.confirm(`Are you sure? This will DELETE picks for Week ${currentWeek}.`)) return;
-    await updateDoc(doc(db, "picks_2025", userId), { [`week${currentWeek}`]: deleteField(), tiebreaker: deleteField() });
-    window.location.reload(); 
-  };
-
-  // --- RENDER FUNCTION COMPONENT ---
+  // --- RENDER HELPERS ---
   const renderPicksGrid = (targetPicks, setTargetPicks, targetTiebreaker, setTargetTiebreaker, isReadOnly = false) => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '15px', maxWidth: '800px', margin: '0 auto' }}>
         {games.map((game) => {
           const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
           const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
           if (!home || !away) return null;
-          
-          const odds = game.competitions[0].odds && game.competitions[0].odds[0] ? game.competitions[0].odds[0].details : "";
+          const odds = game.oddsString || ""; 
           const myPick = targetPicks[game.id];
           const select = () => selectTeam(game.id, away.team.abbreviation, odds, targetPicks, setTargetPicks);
           const selectHome = () => selectTeam(game.id, home.team.abbreviation, odds, targetPicks, setTargetPicks);
@@ -345,7 +309,7 @@ function App() {
           {/* Nav Tabs */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', margin: '20px 0', flexWrap: 'wrap' }}>
             <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
-            <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Make Picks</button>
+            <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: hasSubmitted ? '2px solid #28a745' : 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
             <button onClick={() => setView('matrix')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'matrix' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>All Picks</button>
             {isAdmin && <button onClick={() => setView('admin')} style={{ padding: '8px 20px', borderRadius: '30px', border: '2px solid gold', backgroundColor: view === 'admin' ? 'gold' : 'transparent', color: view === 'admin' ? 'black' : 'gold', fontWeight: 'bold', cursor: 'pointer' }}>👑 Admin</button>}
           </div>
@@ -386,7 +350,7 @@ function App() {
                       <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Week {currentWeek} Pool</p>
                       <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>Pay $10 to @MrDoom ↗</a>
                    </div>
-                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase' }}>Leaderboard</div>
+                   <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Leaderboard</span><span>Projected Wins</span></div>
                    {leaders.map((player) => (
                       <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -396,8 +360,9 @@ function App() {
                             {!player.paid && <div style={{ fontSize: '10px', color: '#ff4444' }}>UNPAID</div>}
                           </div>
                         </div>
-                        <div style={{ backgroundColor: '#28a745', color: 'white', padding: '5px 12px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>
-                          {player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0} Picks
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                            <div style={{ backgroundColor: '#28a745', color: 'white', padding: '5px 12px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>{getCorrectCountForPlayer(player)} Correct</div>
+                            <div style={{ color: '#888', fontSize: '10px', marginTop: '2px' }}>Proj: {getProjectedWins(player)}</div>
                         </div>
                       </div>
                    ))}
@@ -422,13 +387,19 @@ function App() {
             {view === 'picks' && (
               <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 15px' }}>
                 {renderPicksGrid(picks, setPicks, tiebreaker, setTiebreaker, false)}
-                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length && tiebreaker ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length && tiebreaker ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? "Submit All Picks" : `Pick ${games.length - Object.keys(picks).length} More`}</button>
+                <button onClick={submitPicks} style={{ position: 'fixed', bottom: '25px', left: '50%', transform: 'translateX(-50%)', width: '80%', maxWidth: '400px', padding: '18px', backgroundColor: Object.keys(picks).length === games.length && tiebreaker ? '#28a745' : '#555', color: 'white', fontSize: '18px', fontWeight: 'bold', border: 'none', borderRadius: '50px', boxShadow: '0 5px 20px rgba(0,0,0,0.5)', cursor: Object.keys(picks).length === games.length && tiebreaker ? 'pointer' : 'not-allowed', zIndex: 100 }}>{Object.keys(picks).length === games.length ? (hasSubmitted ? "Update Picks" : "Submit Picks") : `Pick ${games.length - Object.keys(picks).length} More`}</button>
               </div>
             )}
 
             {/* === MATRIX === */}
             {view === 'matrix' && (
               <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px', margin: '0 auto' }}>
+                <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🔗 Similar Selections (Diffs)</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+                  {getSimilarSelections().map((sim, i) => (
+                    <div key={i} style={{ backgroundColor: '#333', padding: '8px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%', border: '1px solid #555' }}><span style={{ fontWeight: 'bold', color: '#28a745' }}>{sim.diff} Diff:</span> {sim.name}</div>
+                  ))}
+                </div>
                 <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{Number(currentWeek) < 12 || picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
                   <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}<th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Tie</th><th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Correct</th></tr></thead>
@@ -511,7 +482,7 @@ function App() {
                           <p style={{ fontWeight: 'bold', color: '#28a745', textAlign: 'center' }}>Editing Picks for: {getDisplayName(adminTargetUser)}</p>
                           {renderPicksGrid(adminTargetPicks, setAdminTargetPicks, adminTargetTiebreaker, setAdminTargetTiebreaker, true)}
                           <button onClick={submitAdminPicks} style={{ marginTop: '20px', padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold', width: '100%' }}>
-                              Submit Picks for {getDisplayName(adminTargetUser)}
+                              Submit Picks for {adminTargetUser.userName}
                           </button>
                       </>
                   )}
@@ -530,6 +501,7 @@ function App() {
           </div>
         </>
       )}
+      {/* Ticker (Final Section) */}
       {user && news.length > 0 && <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', backgroundColor: '#000', color: 'white', borderTop: '2px solid #28a745', overflow: 'hidden', whiteSpace: 'nowrap', zIndex: 1000 }}><div style={{ display: 'inline-block', padding: '10px', animation: 'ticker 30s linear infinite' }}>{news.map((n, i) => <span key={i} style={{ marginRight: '50px', fontSize: '14px', fontWeight: 'bold' }}>🏈 {n.headline}</span>)}</div><style>{`@keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }`}</style></div>}
     </div>
   );
