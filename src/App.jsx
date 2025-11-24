@@ -3,27 +3,30 @@ import { signInWithGoogle, db, auth } from './firebase';
 import { doc, setDoc, collection, getDocs, updateDoc, deleteField, getDoc, arrayUnion, arrayRemove, writeBatch } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// --- CONFIG & DATA ---
+// --- CONFIGURATION ---
+const CURRENT_POT_AMOUNT = 60; // <--- UPDATE THIS NUMBER WEEKLY IF NEEDED
+const ENTRY_FEE = 10;
+
 const ALLOWED_EMAILS = [
   "slayer91790@gmail.com", "antoniodanielvazquez@gmail.com", "crazynphat13@gmail.com", "friend1@example.com"
 ];
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
 
-// 📊 SEASON TOTALS (Updated through Week 12)
+// 📊 SEASON TOTALS (Weeks 3-12 Final)
+// Names here must "partially match" the names in the app (e.g. "Albert" matches "Albert Holguin")
 const PAST_STATS = [
-  { name: "Albert", score: 101 },  // 89 + 12
-  { name: "Omar", score: 92 },     // 83 + 9
-  { name: "Art", score: 86 },      // 76 + 10
-  { name: "Luis", score: 84 },     // 77 + 7
-  { name: "Tony", score: 83 },     // 83 + 0 (Did not pick?)
-  { name: "Roman", score: 79 },    // 71 + 8
-  { name: "Andy", score: 79 },     // 79 + 0
-  { name: "Tim", score: 69 },      // 69 + 0
+  { name: "Albert", score: 101 }, 
+  { name: "Omar", score: 92 }, 
+  { name: "Art", score: 86 }, 
+  { name: "Luis", score: 84 }, 
+  { name: "Tony", score: 83 }, 
+  { name: "Roman", score: 79 }, 
+  { name: "Andy", score: 79 }, 
+  { name: "Tim", score: 69 }, 
   { name: "Luis Solorio", score: 53 }, 
-  { name: "Louis", score: 43 }     // 34 + 9
+  { name: "Louis", score: 43 }
 ];
 
-// 🏆 WEEKLY WINNERS (Week 12 Added)
 const WEEKLY_WINNERS = [
   { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" }, 
   { week: 6, winner: "Roman" }, { week: 7, winner: "Albert" }, { week: 8, winner: "Albert" }, 
@@ -33,7 +36,7 @@ const WEEKLY_WINNERS = [
 
 const OLD_WEEKS = {
   3: { games: "BUF,MIN,PIT,PHI,TB,WSH,ATL,JAX,GB,IND,LAC,SEA,SF,CHI,KC,DET".split(",").map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), picks: [] },
-  10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [{ name: "Albert", score: 11, picks: ['DEN','IND','BUF','BAL','NYJ','NE','CAR','HOU','CHI','SEA','LAR','DET','PIT','PHI'] },{ name: "Andy", score: 8, picks: ['DEN','IND','BUF','MIN','CLE','TB','CAR','JAX','CHI','SEA','LAR','DET','LAC','PHI'] },{ name: "Art", score: 7, picks: ['LV','IND','BUF','BAL','CLE','TB','CAR','JAX','CHI','SEA','SF','DET','LAC','PHI'] }] }
+  10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [] }
 };
 
 const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3'];
@@ -45,7 +48,7 @@ function App() {
   const [tiebreaker, setTiebreaker] = useState(""); 
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
-  const [currentWeek, setCurrentWeek] = useState(13); // Start at Week 13
+  const [currentWeek, setCurrentWeek] = useState(13); 
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -144,7 +147,7 @@ function App() {
                 setHasSubmitted(true);
                 setPicks(myEntry[`week${currentWeek}`]);
                 setTiebreaker(myEntry.tiebreaker || "");
-            } else { setHasSubmitted(false); }
+            } else { setHasSubmitted(false); setPicks({}); setTiebreaker(""); }
         }
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
@@ -159,18 +162,21 @@ function App() {
   // --- HELPERS ---
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
   const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
+  
   const calculateStats = (gameId, team) => {
     if (!leaders.length) return 0;
     let pickCount = 0;
     leaders.forEach((player) => { const weekPicks = player[`week${currentWeek}`] || {}; if (weekPicks[gameId] === team) pickCount += 1; });
     return Math.round((pickCount / leaders.length) * 100);
   };
+  
   const getCorrectCountForPlayer = (player) => {
     const weekPicks = player[`week${currentWeek}`] || {};
     let correct = 0;
     games.forEach((game) => { if (game.winner && weekPicks[game.id] === game.winner) correct++; });
     return correct;
   };
+
   const getProjectedWins = (player) => {
     let score = getCorrectCountForPlayer(player);
     games.forEach(g => {
@@ -183,28 +189,25 @@ function App() {
     return score;
   };
 
-  // Total Season Wins: Use hardcoded PAST + Live
+  // 🔥 FIX: Name Matching for Total Stats (Fuzzy Search)
   const getTotalSeasonWins = (player) => {
-      const pastData = PAST_STATS.find(p => p.name === getDisplayName(player));
+      const displayName = getDisplayName(player).toLowerCase();
+      const pastData = PAST_STATS.find(p => 
+          displayName.includes(p.name.toLowerCase()) || 
+          p.name.toLowerCase().includes(displayName)
+      );
       const pastScore = pastData ? pastData.score : 0;
-      // NOTE: In a real DB we would sum up all week fields.
-      // Here we assume we are VIEWING Week 12 (or current) so we add that score.
-      // If user switches dropdown to Week 13, this "Live" score will be 0 until games start.
       return pastScore + getCorrectCountForPlayer(player);
   };
 
-  // 🔥 CLINCHING LOGIC
   const getWinProbability = (player, allPlayers) => {
       if (!games.length) return 0;
       const correct = getCorrectCountForPlayer(player);
       const remaining = games.filter(g => !g.winner).length;
       const maxPossible = correct + remaining;
-      
       const leaderScore = Math.max(0, ...allPlayers.map(p => getCorrectCountForPlayer(p)));
-      
       if (maxPossible < leaderScore) return 0; 
       if (remaining === 0) return correct === leaderScore ? 100 : 0;
-
       const pointsBehind = leaderScore - correct;
       if (pointsBehind === 0) return 60; 
       if (pointsBehind === 1) return 30;
@@ -213,9 +216,7 @@ function App() {
   
   const getDeclaredWinner = () => {
       if (games.length === 0) return null;
-      const winner = leaders.find(p => getWinProbability(p, leaders) === 100);
-      // If multiple people tied at 100% (finished games), use tiebreaker logic visually (not implemented fully here)
-      return winner;
+      return leaders.find(p => getWinProbability(p, leaders) === 100);
   };
 
   const getSimilarSelections = () => {
@@ -358,7 +359,25 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '800px', margin: '0 auto' }}>
                 <div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div><div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>{games.map((game) => { const home = game.competitions[0].competitors.find(c => c.homeAway === 'home'); const away = game.competitions[0].competitors.find(c => c.homeAway === 'away'); if (!home || !away) return null; return (<div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div><div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div></div>) })}</div></div>
                 
+                {/* RULES & POT */}
                 <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
+                   <div style={{ background: 'linear-gradient(90deg, #11998e, #38ef7d)', padding: '20px', textAlign: 'center', color: '#fff' }}>
+                      <h2 style={{ margin: 0, fontSize: '28px' }}>🏆 Pot: ${CURRENT_POT_AMOUNT}</h2>
+                      <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.9 }}>Week {currentWeek} Pool | Entry: ${ENTRY_FEE}</p>
+                      <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px', backgroundColor: 'white', color: '#11998e', padding: '8px 20px', borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}>Pay ${ENTRY_FEE} to @MrDoom ↗</a>
+                   </div>
+                   {/* RULES CARD */}
+                   <div style={{ padding: '15px', backgroundColor: '#252525', borderTop:'1px solid #444', borderBottom:'1px solid #444' }}>
+                       <h4 style={{margin:'0 0 10px 0', color:'#ccc'}}>📜 League Rules</h4>
+                       <ul style={{margin:0, paddingLeft:'20px', fontSize:'12px', color:'#aaa', lineHeight:'1.5'}}>
+                           <li>Pick the winning team (Straight Up) for every game.</li>
+                           <li>Tiebreaker: Guess total score of the Monday Night game.</li>
+                           <li>Picks lock: Before Thursday Night Football kickoff and no changes after submission is allowed.</li>
+                           <li>Weekly entry fee is ${ENTRY_FEE}. Winner takes pot.</li>
+						   <li>Thanksgiving Week (Week 13) is $20 (Double Gobble Week).</li>
+                       </ul>
+                   </div>
+                   
                    <div style={{ padding: '15px', borderBottom: '1px solid #333', fontWeight: 'bold', color: '#888', fontSize: '12px', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' }}><span>Player Status (Week {currentWeek})</span><span>Paid / Picked</span></div>
                    {leaders.map((player) => {
                       const weekPicks = player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0;
@@ -524,7 +543,7 @@ function App() {
                   </table>
                 </div>
 
-                {/* Admin Pick Entry & Guest List */}
+                {/* Admin Pick Entry & Guest List (Preserved) */}
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}><h3>✍️ Admin Pick Entry</h3><select onChange={(e) => { const userObj = leaders.find(l => l.userId === e.target.value); setAdminTargetUser(userObj); if (userObj) { setAdminTargetPicks(userObj[`week${currentWeek}`] || {}); setAdminTargetTiebreaker(userObj.tiebreaker || ""); } else { setAdminTargetPicks({}); setAdminTargetTiebreaker(""); } }} style={{ padding: '10px', borderRadius: '5px', width: '100%' }}><option value="">-- Select Player --</option>{leaders.map(p => <option key={p.userId} value={p.userId}>{getDisplayName(p)}</option>)}</select>{adminTargetUser && <>{renderPicksGrid(adminTargetPicks, setAdminTargetPicks, adminTargetTiebreaker, setAdminTargetTiebreaker, true)}<button onClick={submitAdminPicks} style={{ marginTop: '20px', padding: '15px', backgroundColor: '#28a745', color: 'white', width: '100%', border: 'none', borderRadius: '5px' }}>Submit for {getDisplayName(adminTargetUser)}</button></>}</div>
                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}><h3>👥 Guest List</h3><div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}><input value={newEmailInput} onChange={(e) => setNewEmailInput(e.target.value)} placeholder="Email" style={{ flex: 2, padding: '10px', borderRadius: '5px' }} /><input value={newNicknameInput} onChange={(e) => setNewNicknameInput(e.target.value)} placeholder="Nickname" style={{ flex: 1, padding: '10px', borderRadius: '5px' }} /><button onClick={addGuest} style={{ backgroundColor: '#28a745', color: 'white', border: 'none', padding: '10px', borderRadius: '5px' }}>Add</button></div>{guestList.map(email => <div key={email} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', borderBottom: '1px solid #333' }}><div><span style={{color: 'white'}}>{email}</span>{nicknames[sanitizeEmail(email)] && <span style={{marginLeft: '10px', color: '#28a745'}}>({nicknames[sanitizeEmail(email)]})</span>}</div><button onClick={() => removeGuest(email)} style={{ color: '#ff4444', background: 'none', border: 'none' }}>X</button></div>)}</div>
               </div>
