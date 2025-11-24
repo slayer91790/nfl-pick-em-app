@@ -9,23 +9,30 @@ const ALLOWED_EMAILS = [
 ];
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
 
+// 📊 SEASON TOTALS (Updated through Week 12)
 const PAST_STATS = [
-  { name: "Albert", score: 89 }, { name: "Tony", score: 83 }, { name: "Omar", score: 83 }, 
-  { name: "Andy", score: 79 }, { name: "Luis", score: 77 }, { name: "Art", score: 76 },
-  { name: "Roman", score: 71 }, { name: "Tim", score: 69 }, { name: "Luis Solorio", score: 53 }, 
-  { name: "Louis", score: 34 }
+  { name: "Albert", score: 101 },  // 89 + 12
+  { name: "Omar", score: 92 },     // 83 + 9
+  { name: "Art", score: 86 },      // 76 + 10
+  { name: "Luis", score: 84 },     // 77 + 7
+  { name: "Tony", score: 83 },     // 83 + 0 (Did not pick?)
+  { name: "Roman", score: 79 },    // 71 + 8
+  { name: "Andy", score: 79 },     // 79 + 0
+  { name: "Tim", score: 69 },      // 69 + 0
+  { name: "Luis Solorio", score: 53 }, 
+  { name: "Louis", score: 43 }     // 34 + 9
 ];
 
-// Static History (Week 12 removed so we can prove auto-detection works)
+// 🏆 WEEKLY WINNERS (Week 12 Added)
 const WEEKLY_WINNERS = [
-  { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" }, { week: 6, winner: "Roman" }, { week: 7, winner: "Albert" }, 
-  { week: 8, winner: "Albert" }, { week: 9, winner: "Andy" }, { week: 10, winner: "Albert" }, { week: 11, winner: "Albert" }
+  { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" }, 
+  { week: 6, winner: "Roman" }, { week: 7, winner: "Albert" }, { week: 8, winner: "Albert" }, 
+  { week: 9, winner: "Andy" }, { week: 10, winner: "Albert" }, { week: 11, winner: "Albert" },
+  { week: 12, winner: "Albert" }
 ];
 
 const OLD_WEEKS = {
   3: { games: "BUF,MIN,PIT,PHI,TB,WSH,ATL,JAX,GB,IND,LAC,SEA,SF,CHI,KC,DET".split(",").map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), picks: [] },
-  4: { games: "SEA,PIT,ATL,BUF,DET,NE,LAC,PHI,HOU,LAR,JAX,KC,LV,GB,MIA,DEN".split(",").map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), picks: [] },
-  5: { games: "LAR,MIN,IND,NO,DAL,DEN,CAR,HOU,TEN,TB,WSH,DET,NE,JAX".split(",").map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), picks: [] },
   10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [{ name: "Albert", score: 11, picks: ['DEN','IND','BUF','BAL','NYJ','NE','CAR','HOU','CHI','SEA','LAR','DET','PIT','PHI'] },{ name: "Andy", score: 8, picks: ['DEN','IND','BUF','MIN','CLE','TB','CAR','JAX','CHI','SEA','LAR','DET','LAC','PHI'] },{ name: "Art", score: 7, picks: ['LV','IND','BUF','BAL','CLE','TB','CAR','JAX','CHI','SEA','SF','DET','LAC','PHI'] }] }
 };
 
@@ -38,7 +45,7 @@ function App() {
   const [tiebreaker, setTiebreaker] = useState(""); 
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
-  const [currentWeek, setCurrentWeek] = useState(12); // Ensure this matches the week you want to view
+  const [currentWeek, setCurrentWeek] = useState(13); // Start at Week 13
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -117,21 +124,7 @@ function App() {
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
         const processedGames = (gamesData.events || []).map(g => {
-            // FIX: Robust Winner Detection (Score Check)
-            const comp = g.competitions[0];
-            const home = comp.competitors.find(c => c.homeAway === 'home');
-            const away = comp.competitors.find(c => c.homeAway === 'away');
-            
-            let winner = comp.competitors.find(c => c.winner === true)?.team.abbreviation;
-            
-            // Fallback: If no explicit winner tag, check scores if Final
-            if (!winner && g.status.type.completed) {
-                const homeScore = parseInt(home.score);
-                const awayScore = parseInt(away.score);
-                if (homeScore > awayScore) winner = home.team.abbreviation;
-                else if (awayScore > homeScore) winner = away.team.abbreviation;
-            }
-
+            const winner = g.competitions[0].competitors.find(c => c.winner === true)?.team.abbreviation;
             const odds = g.competitions[0].odds && g.competitions[0].odds[0] ? g.competitions[0].odds[0].details : "";
             return { ...g, winner, oddsString: odds };
         });
@@ -383,20 +376,6 @@ function App() {
                       </div>
                    )})}
                 </div>
-                
-                {/* Total Season Standings on Dashboard */}
-                <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                  <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>🏆 Full Season Leaderboard (Live)</div>
-                  {leaders.sort((a,b) => getTotalSeasonWins(b) - getTotalSeasonWins(a)).map((player, index) => (
-                    <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                         <div style={{ width: '25px', height: '25px', borderRadius: '50%', backgroundColor: index===0?'gold':'#444', color: index===0?'black':'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>{index+1}</div>
-                         <div style={{ fontWeight: 'bold', color: 'white' }}>{getDisplayName(player)}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold' }}>{getTotalSeasonWins(player)} Correct</div></div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
@@ -466,13 +445,6 @@ function App() {
             {view === 'winners' && (
                 <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '30px' }}>
                     <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding:'20px' }}>
-                        {/* LIVE WINNER BANNER */}
-                        {getDeclaredWinner() && Number(currentWeek) >= 12 && (
-                             <div style={{ backgroundColor: '#28a745', padding: '15px', textAlign: 'center', color: 'white', borderRadius:'10px', marginBottom:'20px' }}>
-                                 <div style={{fontSize:'20px'}}>🏆 WEEK {currentWeek} WINNER 🏆</div>
-                                 <h1 style={{margin:'10px 0'}}>{getDisplayName(getDeclaredWinner())}</h1>
-                             </div>
-                        )}
                         <h3 style={{ textAlign:'center', marginTop:0, color:'gold' }}>🏅 Weekly Winners</h3>
                         {WEEKLY_WINNERS.map(w => (
                             <div key={w.week} style={{ display:'flex', justifyContent:'space-between', padding:'15px', borderBottom:'1px solid #333' }}>
