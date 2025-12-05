@@ -12,16 +12,15 @@ const ALLOWED_EMAILS = [
 ];
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
 
-// 📊 SEASON TOTALS (Updated Final after Week 13)
-// These are the starting points for Week 14
+// 📊 SEASON TOTALS (Weeks 3-13 Final)
 const PAST_STATS = [
   { name: "Albert Holguin", score: 111 }, 
   { name: "Osvaldo Sanchez", score: 101 }, 
   { name: "Art Villa", score: 94 }, 
   { name: "Luis Sanchez", score: 92 }, 
   { name: "Roman Gonzalez", score: 89 }, 
-  { name: "Timothy Anguiano", score: 79 }, // Updated Tim's name to match screenshot
-  { name: "Tony", score: 83 }, // Tony didn't appear in top 10 screenshot, keeping estimate or 83
+  { name: "Timothy Anguiano", score: 79 }, 
+  { name: "Tony", score: 83 }, 
   { name: "Andy", score: 79 }, 
   { name: "Louis G", score: 53 },
   { name: "Luis Solorio", score: 53 },
@@ -30,13 +29,13 @@ const PAST_STATS = [
   { name: "Antonio Vazquez", score: 5 }
 ];
 
-// 🏆 WEEKLY WINNERS HISTORY
+// 🏆 WEEKLY WINNERS
 const WEEKLY_WINNERS = [
   { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" }, 
   { week: 6, winner: "Roman" }, { week: 7, winner: "Albert" }, { week: 8, winner: "Albert" }, 
   { week: 9, winner: "Andy" }, { week: 10, winner: "Albert" }, { week: 11, winner: "Albert" },
   { week: 12, winner: "Albert Holguin" },
-  { week: 13, winner: "Tim" } 
+  { week: 13, winner: "Timothy Anguiano" }
 ];
 
 const OLD_WEEKS = {
@@ -53,7 +52,7 @@ function App() {
   const [tiebreaker, setTiebreaker] = useState(""); 
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
-  const [currentWeek, setCurrentWeek] = useState(14); // 🗓️ Default Week 14
+  const [currentWeek, setCurrentWeek] = useState(14); 
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -61,6 +60,7 @@ function App() {
   const [guestList, setGuestList] = useState([]);
   const [nicknames, setNicknames] = useState({});
   const [phoneNumbers, setPhoneNumbers] = useState({}); 
+  const [databaseWinners, setDatabaseWinners] = useState({});
   const [newEmailInput, setNewEmailInput] = useState("");
   const [newNicknameInput, setNewNicknameInput] = useState("");
   const [newPhoneInput, setNewPhoneInput] = useState(""); 
@@ -79,7 +79,7 @@ function App() {
   const introRef = useRef(new Audio('/intro.mp3'));
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
   const musicPlayedRef = useRef(false);
-  const sanitizeEmail = (email) => email.replace(/\./g, '_');
+  const sanitizeEmail = (email) => email ? email.replace(/\./g, '_') : "";
 
   // --- 1. Load Config ---
   useEffect(() => {
@@ -91,9 +91,10 @@ function App() {
         setGuestList(data.allowedEmails || []);
         setNicknames(data.nicknames || {});
         setPhoneNumbers(data.phones || {}); 
+        setDatabaseWinners(data.winners || {});
         setPicksVisible(data.picksVisible || false); 
       } else {
-        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, phones:{}, picksVisible: false });
+        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, phones:{}, winners:{}, picksVisible: false });
         setGuestList([...ALLOWED_EMAILS]);
       }
       setConfigLoaded(true);
@@ -141,7 +142,7 @@ function App() {
                 { homeAway: 'away', team: { abbreviation: g.away || 'OPP', logo: '' }, score: g.winner===g.away?'W':'-' }
             ] }] 
         })));
-        setLeaders(archive.picks.length > 0 ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
+        setLeaders(archive.picks ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
         return; 
       }
       try {
@@ -167,14 +168,15 @@ function App() {
             const dbPicks = myEntry ? myEntry[`week${currentWeek}`] : null;
             if (dbPicks) setHasSubmitted(true);
             
-            if (!userPicksLoadedRef.current || (dbPicks && Object.keys(dbPicks).length > 0)) {
+            // Safe Load Logic: If local empty OR DB has confirmed data
+            if (Object.keys(picks).length === 0 || (dbPicks && Object.keys(dbPicks).length > 0)) {
                  if (dbPicks) {
                      setPicks(dbPicks);
                      setTiebreaker(myEntry.tiebreaker || "");
-                 } 
-                 userPicksLoadedRef.current = true; 
+                 }
             }
         }
+        
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
@@ -190,14 +192,12 @@ function App() {
   const getCurrentPot = () => leaders.length * getWeeklyFee();
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
   const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
-  
   const getCorrectCountForPlayer = (player) => {
     const weekPicks = player[`week${currentWeek}`] || {};
     let correct = 0;
     games.forEach((game) => { if (game.winner && weekPicks[game.id] === game.winner) correct++; });
     return correct;
   };
-
   const getProjectedWins = (player) => {
     let score = getCorrectCountForPlayer(player);
     games.forEach(g => {
@@ -209,39 +209,61 @@ function App() {
     });
     return score;
   };
-
   const getTotalSeasonWins = (player) => {
       const displayName = getDisplayName(player).toLowerCase();
-      // Match by partial name (e.g., "Timothy" matches "Tim")
       const pastData = PAST_STATS.find(p => 
           displayName.includes(p.name.toLowerCase()) || 
           p.name.toLowerCase().includes(displayName)
       );
       const pastScore = pastData ? pastData.score : 0;
-      // Only add current week correct count if we are viewing the current live week (14+)
-      // If we go back to view Week 13, the base stats (111) already include Week 13, so we shouldn't add the correct count again.
-      // LOGIC: If viewing Week >= 14, add correct count.
       return pastScore + (Number(currentWeek) >= 14 ? getCorrectCountForPlayer(player) : 0);
   };
 
+  // 🔥 UPDATED ALGORITHM: EXPONENTIAL STRENGTH
   const getWinProbability = (player, allPlayers) => {
       if (!games.length) return 0;
       const correct = getCorrectCountForPlayer(player);
       const remaining = games.filter(g => !g.winner).length;
-      const maxPossible = correct + remaining;
       const leaderScore = Math.max(0, ...allPlayers.map(p => getCorrectCountForPlayer(p)));
-      if (maxPossible < leaderScore) return 0; 
+      const maxPossible = correct + remaining;
+
+      // 1. Elimination
+      if (maxPossible < leaderScore) return 0;
+
+      // 2. Clinch
       if (remaining === 0) return correct === leaderScore ? 100 : 0;
-      const pointsBehind = leaderScore - correct;
-      if (pointsBehind === 0) return 60; 
-      if (pointsBehind === 1) return 30;
-      return 10; 
+
+      // 3. Weighted Strength (Current Wins worth 50, Projected Wins SQUARED)
+      // Squaring the projection makes 13 (169) worth way more than 8 (64)
+      const calculateStrength = (p) => {
+          const pCorrect = getCorrectCountForPlayer(p);
+          const pProj = getProjectedWins(p);
+          if ((pCorrect + remaining) < leaderScore) return 0; 
+          return (pCorrect * 50) + (pProj * pProj); 
+      };
+
+      const myStrength = calculateStrength(player);
+      if (myStrength === 0) return 0;
+
+      let totalStrength = 0;
+      allPlayers.forEach(p => { totalStrength += calculateStrength(p); });
+
+      return Math.round((myStrength / totalStrength) * 100);
   };
   
   const getDeclaredWinner = () => {
       if (games.length === 0) return null;
-      if (Number(currentWeek) === 12) return { userName: "Albert Holguin", userId: "override" };
-      return leaders.find(p => getWinProbability(p, leaders) === 100);
+      if (databaseWinners[currentWeek]) return { userName: databaseWinners[currentWeek], userId:'db' };
+      const winners = leaders.filter(p => getWinProbability(p, leaders) === 100);
+      if (winners.length === 1) return winners[0];
+      if (winners.length > 1) return { userName: "Multiple Winners (Tie)", userId: 'tie' };
+      return null;
+  };
+
+  const getWinStatusText = (prob) => {
+      if (prob === 100) return "🏆 WINNER";
+      if (prob === 0) return "❌ ELIM";
+      return `${prob}%`;
   };
 
   const getSimilarSelections = () => {
@@ -252,6 +274,16 @@ function App() {
         games.forEach(g => { if (picks[g.id] && theirPicks[g.id] && picks[g.id] !== theirPicks[g.id]) diff++; });
         return { name: getDisplayName(player), diff };
     }).sort((a, b) => a.diff - b.diff);
+  };
+  
+  const getCombinedWeeklyWinners = () => {
+      const history = [...WEEKLY_WINNERS];
+      Object.keys(databaseWinners).forEach(week => {
+          if(!history.find(h => h.week === Number(week))) {
+              history.push({ week: Number(week), winner: databaseWinners[week] });
+          }
+      });
+      return history.sort((a,b) => a.week - b.week);
   };
 
   // --- ACTIONS ---
@@ -325,6 +357,15 @@ function App() {
      alert(`✅ Updated phone for ${adminProfileUser.userName}`);
      window.location.reload();
   };
+  const finalizeWeekWinner = async () => {
+      const winner = getDeclaredWinner();
+      if (!winner) { alert("No winner calculated yet."); return; }
+      const name = getDisplayName(winner); 
+      if (!window.confirm(`Declare ${name} as Week ${currentWeek} Winner?`)) return;
+      await updateDoc(doc(db, "config", "settings"), { [`winners.${currentWeek}`]: name });
+      setDatabaseWinners(prev => ({ ...prev, [currentWeek]: name }));
+      alert("✅ Winner Saved!");
+  };
   const addGuest = async () => {
     if (!newEmailInput) return;
     const email = newEmailInput.toLowerCase().trim();
@@ -387,7 +428,6 @@ function App() {
             <button onClick={() => setView('dashboard')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'dashboard' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Dashboard</button>
             <button onClick={() => setView('picks')} style={{ padding: '8px 20px', borderRadius: '30px', border: hasSubmitted ? '2px solid #28a745' : 'none', backgroundColor: view === 'picks' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
             <button onClick={() => setView('matrix')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'matrix' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>All Picks</button>
-            <button onClick={() => setView('projections')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'projections' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Projections</button>
             <button onClick={() => setView('winners')} style={{ padding: '8px 20px', borderRadius: '30px', border: 'none', backgroundColor: view === 'winners' ? '#28a745' : '#333', color: 'white', fontWeight: 'bold', cursor: 'pointer' }}>Winners</button>
             {isAdmin && <button onClick={() => setView('admin')} style={{ padding: '8px 20px', borderRadius: '30px', border: '2px solid gold', backgroundColor: view === 'admin' ? 'gold' : 'transparent', color: view === 'admin' ? 'black' : 'gold', fontWeight: 'bold', cursor: 'pointer' }}>👑 Admin</button>}
           </div>
@@ -436,48 +476,21 @@ function App() {
               </div>
             )}
 
-            {/* === PROJECTIONS === */}
-            {view === 'projections' && (
-                <div style={{ maxWidth: '800px', margin: '0 auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', overflow:'hidden' }}>
-                     {getDeclaredWinner() && (
-                         <div style={{ backgroundColor: '#28a745', padding: '20px', textAlign: 'center', color: 'white' }}>
-                             <div style={{fontSize:'30px'}}>🏆 WINNER DECLARED 🏆</div>
-                             <h1 style={{margin:'10px 0'}}>{getDisplayName(getDeclaredWinner())}</h1>
-                             <p>100% Probability to Win Week {currentWeek}</p>
-                         </div>
-                     )}
-                     <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px' }}>📈 Live Win Probability (Week {currentWeek})</div>
-                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
-                        <thead><tr><th style={{textAlign:'left', padding:'15px'}}>Player</th><th>Current</th><th>Projected</th><th>Win %</th></tr></thead>
-                        <tbody>
-                            {[...leaders].sort((a,b) => getWinProbability(b, leaders) - getWinProbability(a, leaders)).map(p => {
-                                const prob = getWinProbability(p, leaders);
-                                return (
-                                    <tr key={p.userId} style={{ borderTop: '1px solid #444' }}>
-                                        <td style={{ padding: '15px', fontWeight: 'bold' }}>{getDisplayName(p)}</td>
-                                        <td style={{ textAlign: 'center', color: '#28a745', fontWeight:'bold' }}>{getCorrectCountForPlayer(p)}</td>
-                                        <td style={{ textAlign: 'center' }}>{getProjectedWins(p)}</td>
-                                        <td style={{ textAlign: 'center', fontWeight:'bold', color: prob > 50 ? '#28a745' : (prob === 0 ? '#666' : 'gold') }}>{prob === 100 ? "🏆 CLINCHED" : (prob === 0 ? "❌ ELIM" : `${prob}%`)}</td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                     </table>
-                </div>
-            )}
-            
+            {/* === MATRIX (ALL PICKS + WIN %) === */}
             {view === 'matrix' && (
               <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding: '10px', margin: '0 auto' }}>
                 <div style={{ padding: '15px', backgroundColor: '#444', fontWeight: 'bold', color: 'white', fontSize: '14px', marginBottom: '10px' }}>🔗 Similar Selections</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>{getSimilarSelections().map((sim, i) => (<div key={i} style={{ backgroundColor: '#333', padding: '8px', borderRadius: '5px', fontSize: '12px', flex: '1 1 40%', border: '1px solid #555' }}><span style={{ fontWeight: 'bold', color: '#28a745' }}>{sim.diff} Diff:</span> {sim.name}</div>))}</div>
                 <div style={{textAlign:'center', padding:'10px', color: '#888', fontWeight:'bold'}}>{Number(currentWeek) < 12 || picksVisible ? "✅ PICKS REVEALED" : "🔒 PICKS HIDDEN"}</div>
-                {/* Matrix Table */}
+                
+                {/* 🟢 Matrix Table with Win % Column */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: 'white' }}>
-                  <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}<th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Tie</th><th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Correct</th><th style={{ padding: '5px', borderBottom: '1px solid #444', color:'gold' }}>Proj</th></tr></thead>
+                  <thead><tr><th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #444', minWidth: '100px', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>Player</th>{games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id} style={{ padding: '5px', borderBottom: '1px solid #444', minWidth: '40px' }}>{away}</th> })}<th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Tie</th><th style={{ padding: '5px', borderBottom: '1px solid #444' }}>Correct</th><th style={{ padding: '5px', borderBottom: '1px solid #444', color:'gold' }}>Proj</th><th style={{ padding: '5px', borderBottom: '1px solid #444', color:'#28a745' }}>Win %</th></tr></thead>
                   <tbody>
-                    {leaders.map(player => {
+                    {leaders.sort((a,b) => getCorrectCountForPlayer(b) - getCorrectCountForPlayer(a)).map(player => {
                       const playerPicks = player[`week${currentWeek}`] || {};
                       const showPicks = Number(currentWeek) < 12 || picksVisible || isAdmin || (user && player.userId === user.uid);
+                      const prob = getWinProbability(player, leaders);
                       return (
                         <tr key={player.userId}>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', fontWeight: 'bold', position: 'sticky', left: 0, backgroundColor: '#1e1e1e' }}>{getDisplayName(player)}</td>
@@ -487,7 +500,6 @@ function App() {
                             return <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', backgroundColor: showPicks ? color : 'transparent', color: showPicks && (pick === g.winner || !g.winner) ? 'black' : 'white' }}>{showPicks ? (pick || "-") : "🔒"}</td>
                           })}
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{showPicks ? (player.tiebreaker || "-") : "🔒"}
-                            {/* Tiebreaker Diff Display (Works for Active & Final) */}
                             {showPicks && player.tiebreaker && games.length > 0 && (
                                 <span style={{fontSize:'10px', color:'#888', display:'block'}}>
                                     ({Math.abs(parseInt(player.tiebreaker) - (parseInt(games[games.length-1].competitions[0].competitors[0].score) + parseInt(games[games.length-1].competitions[0].competitors[1].score)))} off)
@@ -496,6 +508,7 @@ function App() {
                           </td>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: '#28a745', fontWeight:'bold' }}>{getCorrectCountForPlayer(player)}</td>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: 'gold' }}>{getProjectedWins(player)}</td>
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: prob > 0 ? '#28a745' : '#666', fontWeight:'bold' }}>{getWinStatusText(prob)}</td>
                         </tr>
                       )
                     })}
@@ -516,27 +529,12 @@ function App() {
                              </div>
                         )}
                         <h3 style={{ textAlign:'center', marginTop:0, color:'gold' }}>🏅 Weekly Winners</h3>
-                        {WEEKLY_WINNERS.map(w => (
+                        {getCombinedWeeklyWinners().map(w => (
                             <div key={w.week} style={{ display:'flex', justifyContent:'space-between', padding:'15px', borderBottom:'1px solid #333' }}>
                                 <span style={{color:'#888', fontWeight:'bold'}}>Week {w.week}</span>
                                 <span style={{fontWeight:'bold', fontSize:'16px'}}>{w.winner}</span>
                             </div>
                         ))}
-                    </div>
-                    
-                    {/* Full Season Leaderboard */}
-                    <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', overflow: 'hidden', border: '1px solid #333' }}>
-                      <div style={{ padding: '15px', backgroundColor: '#333', fontWeight: 'bold', color: 'white', fontSize: '14px', textAlign:'center' }}>🏆 Full Season Leaderboard (Live)</div>
-                      {/* Sort Copy of Array */}
-                      {[...leaders].sort((a,b) => getTotalSeasonWins(b) - getTotalSeasonWins(a)).map((player, index) => (
-                        <div key={player.userId} style={{ padding: '20px', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                             <div style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: index===0?'gold':(index===1?'silver':(index===2?'#cd7f32':'#444')), color: index<3?'black':'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>{index+1}</div>
-                             <div style={{ fontWeight: 'bold', color: 'white', fontSize:'16px' }}>{getDisplayName(player)}</div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}><div style={{ color: '#28a745', fontWeight: 'bold', fontSize:'18px' }}>{getTotalSeasonWins(player)} Wins</div></div>
-                        </div>
-                      ))}
                     </div>
                 </div>
             )}
@@ -554,7 +552,7 @@ function App() {
             {/* === ADMIN === */}
             {view === 'admin' && isAdmin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px', margin: '0 auto' }}>
-                 {/* Stats & Game Control */}
+                 {/* Stats & Controls */}
                  <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}>
                     <h3>📊 Weekly Stats</h3>
                     <div style={{ display: 'flex', justifyContent: 'space-around' }}>
@@ -563,8 +561,8 @@ function App() {
                         <div>🏆 Pot: <span style={{color:'gold', fontWeight:'bold'}}>${leaders.length * ENTRY_FEE}</span></div>
                     </div>
                  </div>
-
-                <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "✅ Picks are Visible" : "⚠ Waiting for Kickoff? Click to Reveal"}</button></div>
+                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>⚙️ Game Control</h3><button onClick={togglePicksVisibility} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: picksVisible ? '#d9534f' : '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>{picksVisible ? "✅ Picks are Visible" : "⚠ Waiting for Kickoff? Click to Reveal"}</button></div>
+                 <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333', textAlign: 'center' }}><h3>🏆 Finalize Winner</h3><button onClick={finalizeWeekWinner} style={{ padding: '15px 30px', borderRadius: '5px', border: 'none', cursor: 'pointer', backgroundColor: '#28a745', color: 'white', fontSize: '18px', fontWeight: 'bold' }}>Finalize Week {currentWeek} Winner</button></div>
                 
                 {/* 💸 PAYMENT MATRIX */}
                 <div style={{ overflowX: 'auto', backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '15px', border: '1px solid #333' }}>
@@ -647,6 +645,15 @@ function App() {
           </div>
         </>
       )}
+      
+      {/* 🟢 NEWS TICKER */}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, width: '100%', height: '40px', backgroundColor: '#000', color: 'white', display: 'flex', alignItems: 'center', overflow: 'hidden', borderTop: '2px solid #d9534f', zIndex: 9999 }}>
+        <div style={{ backgroundColor: '#d9534f', padding: '0 15px', height: '100%', display: 'flex', alignItems: 'center', fontWeight: 'bold', fontSize: '14px', zIndex: 10 }}>BREAKING</div>
+        <div style={{ whiteSpace: 'nowrap', animation: 'ticker 30s linear infinite', paddingLeft: '100%' }}>
+          {news.length > 0 ? news.map((n, i) => <span key={i} style={{ marginRight: '50px', fontSize: '14px' }}>🏈 {n.headline}</span>) : "Loading NFL News..."}
+        </div>
+        <style>{`@keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }`}</style>
+      </div>
     </div>
   );
 }
