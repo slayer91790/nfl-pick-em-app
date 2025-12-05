@@ -12,52 +12,36 @@ const ALLOWED_EMAILS = [
 ];
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
 
-// 📊 SEASON TOTALS
+// 📊 SEASON TOTALS (Updated Final after Week 13)
+// These are the starting points for Week 14
 const PAST_STATS = [
-  { name: "Albert Holguin", score: 101 }, 
-  { name: "Osvaldo Sanchez", score: 92 }, 
-  { name: "Art Villa", score: 86 }, 
-  { name: "Luis Sanchez", score: 84 }, 
-  { name: "Tony", score: 83 }, 
-  { name: "Roman Gonzalez", score: 79 }, 
+  { name: "Albert Holguin", score: 111 }, 
+  { name: "Osvaldo Sanchez", score: 101 }, 
+  { name: "Art Villa", score: 94 }, 
+  { name: "Luis Sanchez", score: 92 }, 
+  { name: "Roman Gonzalez", score: 89 }, 
+  { name: "Timothy Anguiano", score: 79 }, // Updated Tim's name to match screenshot
+  { name: "Tony", score: 83 }, // Tony didn't appear in top 10 screenshot, keeping estimate or 83
   { name: "Andy", score: 79 }, 
-  { name: "Tim", score: 69 }, 
-  { name: "Luis Solorio", score: 53 }, 
-  { name: "Louis G", score: 43 }
+  { name: "Louis G", score: 53 },
+  { name: "Luis Solorio", score: 53 },
+  { name: "Adrian Sanchez", score: 9 },
+  { name: "Andres Vazquez", score: 9 },
+  { name: "Antonio Vazquez", score: 5 }
 ];
 
+// 🏆 WEEKLY WINNERS HISTORY
 const WEEKLY_WINNERS = [
   { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" }, 
   { week: 6, winner: "Roman" }, { week: 7, winner: "Albert" }, { week: 8, winner: "Albert" }, 
   { week: 9, winner: "Andy" }, { week: 10, winner: "Albert" }, { week: 11, winner: "Albert" },
-  { week: 12, winner: "Albert Holguin" }
+  { week: 12, winner: "Albert Holguin" },
+  { week: 13, winner: "Tim" } 
 ];
 
-// 🛡️ SAFE DATA: Arrays instead of long strings to prevent copy-paste errors
 const OLD_WEEKS = {
-  3: { 
-    games: ["BUF","MIN","PIT","PHI","TB","WSH","ATL","JAX","GB","IND","LAC","SEA","SF","CHI","KC","DET"].map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), 
-    picks: [] 
-  },
-  10: { 
-    games: [
-        { id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },
-        { id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },
-        { id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },
-        { id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },
-        { id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },
-        { id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },
-        { id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },
-        { id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },
-        { id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },
-        { id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },
-        { id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },
-        { id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },
-        { id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },
-        { id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }
-    ], 
-    picks: [] 
-  }
+  3: { games: "BUF,MIN,PIT,PHI,TB,WSH,ATL,JAX,GB,IND,LAC,SEA,SF,CHI,KC,DET".split(",").map((w,i)=>({id:String(i), shortName:`G${i+1}`, winner:w})), picks: [] },
+  10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [] }
 };
 
 const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3'];
@@ -69,7 +53,7 @@ function App() {
   const [tiebreaker, setTiebreaker] = useState(""); 
   const [view, setView] = useState('dashboard'); 
   const [leaders, setLeaders] = useState([]);
-  const [currentWeek, setCurrentWeek] = useState(13); 
+  const [currentWeek, setCurrentWeek] = useState(14); // 🗓️ Default Week 14
   const [isAdmin, setIsAdmin] = useState(false);
   const [news, setNews] = useState([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -95,26 +79,24 @@ function App() {
   const introRef = useRef(new Audio('/intro.mp3'));
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
   const musicPlayedRef = useRef(false);
-  const sanitizeEmail = (email) => email ? email.replace(/\./g, '_') : "";
+  const sanitizeEmail = (email) => email.replace(/\./g, '_');
 
   // --- 1. Load Config ---
   useEffect(() => {
     const loadConfig = async () => {
-      try {
-          const configRef = doc(db, "config", "settings");
-          const docSnap = await getDoc(configRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setGuestList(data.allowedEmails || []);
-            setNicknames(data.nicknames || {});
-            setPhoneNumbers(data.phones || {}); 
-            setPicksVisible(data.picksVisible || false); 
-          } else {
-            await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, phones:{}, picksVisible: false });
-            setGuestList([...ALLOWED_EMAILS]);
-          }
-          setConfigLoaded(true);
-      } catch(e) { console.error("Config Load Error:", e); }
+      const configRef = doc(db, "config", "settings");
+      const docSnap = await getDoc(configRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setGuestList(data.allowedEmails || []);
+        setNicknames(data.nicknames || {});
+        setPhoneNumbers(data.phones || {}); 
+        setPicksVisible(data.picksVisible || false); 
+      } else {
+        await setDoc(configRef, { allowedEmails: [...ALLOWED_EMAILS], nicknames: {}, phones:{}, picksVisible: false });
+        setGuestList([...ALLOWED_EMAILS]);
+      }
+      setConfigLoaded(true);
     };
     loadConfig();
   }, []);
@@ -124,7 +106,7 @@ function App() {
     if (!configLoaded) return; 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        const email = currentUser.email ? currentUser.email.toLowerCase() : "";
+        const email = currentUser.email.toLowerCase();
         const isAllowed = guestList.some(e => e.toLowerCase() === email) || ADMIN_EMAILS.some(e => e.toLowerCase() === email);
         if (isAllowed) {
           setUser(currentUser);
@@ -150,7 +132,6 @@ function App() {
       const weekNum = Number(currentWeek);
       if (OLD_WEEKS[weekNum]) {
         const archive = OLD_WEEKS[weekNum];
-        // Safe mapping for archive games
         setGames(archive.games.map((g, i) => ({ 
             id: g.id || String(i), 
             status: { type: { shortDetail: 'Final' } }, 
@@ -160,17 +141,15 @@ function App() {
                 { homeAway: 'away', team: { abbreviation: g.away || 'OPP', logo: '' }, score: g.winner===g.away?'W':'-' }
             ] }] 
         })));
-        setLeaders(archive.picks ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
+        setLeaders(archive.picks.length > 0 ? archive.picks.map(p => ({ userName: p.name, userId: p.name, paid: true, [`week${currentWeek}`]: p.picks.reduce((acc, pick, i) => ({ ...acc, [archive.games[i].id || String(i)]: pick }), {}) })) : []);
         return; 
       }
-
       try {
         const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${currentWeek}&seasontype=2`);
         const gamesData = await gamesRes.json();
         const processedGames = (gamesData.events || []).map(g => {
-            const comp = g.competitions[0];
-            const winner = comp.competitors.find(c => c.winner === true)?.team.abbreviation;
-            const odds = comp.odds && comp.odds[0] ? comp.odds[0].details : "";
+            const winner = g.competitions[0].competitors.find(c => c.winner === true)?.team.abbreviation;
+            const odds = g.competitions[0].odds && g.competitions[0].odds[0] ? g.competitions[0].odds[0].details : "";
             return { ...g, winner, oddsString: odds };
         });
         setGames(processedGames);
@@ -186,14 +165,8 @@ function App() {
         if (user) {
             const myEntry = loadedLeaders.find(l => l.userId === user.uid);
             const dbPicks = myEntry ? myEntry[`week${currentWeek}`] : null;
-
-            if (dbPicks) {
-                setHasSubmitted(true);
-            } else {
-                setHasSubmitted(false);
-            }
-
-            // Safe Load Logic to prevent overwriting user work
+            if (dbPicks) setHasSubmitted(true);
+            
             if (!userPicksLoadedRef.current || (dbPicks && Object.keys(dbPicks).length > 0)) {
                  if (dbPicks) {
                      setPicks(dbPicks);
@@ -202,13 +175,11 @@ function App() {
                  userPicksLoadedRef.current = true; 
             }
         }
-
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
         setNews(newsData.articles || []);
       } catch (error) { console.error("API Error", error); }
     };
-    
     const refreshInterval = setInterval(fetchData, 60000); 
     fetchData();
     return () => clearInterval(refreshInterval);
@@ -219,17 +190,18 @@ function App() {
   const getCurrentPot = () => leaders.length * getWeeklyFee();
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
   const getCellColor = (pick, winner) => { if (!pick) return '#666'; if (!winner) return '#fff'; return pick === winner ? '#28a745' : '#d9534f'; };
+  
   const getCorrectCountForPlayer = (player) => {
     const weekPicks = player[`week${currentWeek}`] || {};
     let correct = 0;
     games.forEach((game) => { if (game.winner && weekPicks[game.id] === game.winner) correct++; });
     return correct;
   };
+
   const getProjectedWins = (player) => {
     let score = getCorrectCountForPlayer(player);
     games.forEach(g => {
-        // Add points for picks matching the favorite in un-finished games
-        if (g.status?.type?.shortDetail !== 'Final' && g.oddsString && g.oddsString.includes('-')) {
+        if (g.status.type.shortDetail !== 'Final' && g.oddsString && g.oddsString.includes('-')) {
              const favTeam = g.oddsString.split(' ')[0];
              const weekPicks = player[`week${currentWeek}`] || {};
              if (weekPicks[g.id] === favTeam) score++;
@@ -237,35 +209,41 @@ function App() {
     });
     return score;
   };
+
   const getTotalSeasonWins = (player) => {
       const displayName = getDisplayName(player).toLowerCase();
+      // Match by partial name (e.g., "Timothy" matches "Tim")
       const pastData = PAST_STATS.find(p => 
           displayName.includes(p.name.toLowerCase()) || 
           p.name.toLowerCase().includes(displayName)
       );
       const pastScore = pastData ? pastData.score : 0;
-      return pastScore + getCorrectCountForPlayer(player);
+      // Only add current week correct count if we are viewing the current live week (14+)
+      // If we go back to view Week 13, the base stats (111) already include Week 13, so we shouldn't add the correct count again.
+      // LOGIC: If viewing Week >= 14, add correct count.
+      return pastScore + (Number(currentWeek) >= 14 ? getCorrectCountForPlayer(player) : 0);
   };
+
   const getWinProbability = (player, allPlayers) => {
       if (!games.length) return 0;
       const correct = getCorrectCountForPlayer(player);
       const remaining = games.filter(g => !g.winner).length;
       const maxPossible = correct + remaining;
       const leaderScore = Math.max(0, ...allPlayers.map(p => getCorrectCountForPlayer(p)));
-      
       if (maxPossible < leaderScore) return 0; 
       if (remaining === 0) return correct === leaderScore ? 100 : 0;
-
       const pointsBehind = leaderScore - correct;
       if (pointsBehind === 0) return 60; 
       if (pointsBehind === 1) return 30;
       return 10; 
   };
+  
   const getDeclaredWinner = () => {
       if (games.length === 0) return null;
       if (Number(currentWeek) === 12) return { userName: "Albert Holguin", userId: "override" };
       return leaders.find(p => getWinProbability(p, leaders) === 100);
   };
+
   const getSimilarSelections = () => {
     if (!picks || Object.keys(picks).length === 0) return [];
     return leaders.filter(p => p.userId !== user.uid).map(player => {
@@ -373,9 +351,7 @@ function App() {
         {games.map((game) => {
           const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
           const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
-          // SAFEGUARD: If game data is incomplete, skip rendering
           if (!home || !away) return null;
-          
           const odds = game.oddsString || ""; 
           const myPick = targetPicks[game.id];
           const select = () => selectTeam(game.id, away.team.abbreviation, odds, targetPicks, setTargetPicks);
@@ -421,7 +397,6 @@ function App() {
             {/* === DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '800px', margin: '0 auto' }}>
-                {/* Live Scores */}
                 <div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#888', marginBottom: '10px', textTransform: 'uppercase' }}>Live Scores</div><div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>{games.map((game) => { const home = game.competitions[0].competitors.find(c => c.homeAway === 'home'); const away = game.competitions[0].competitors.find(c => c.homeAway === 'away'); if (!home || !away) return null; return (<div key={game.id} style={{ minWidth: '200px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '15px', border: '1px solid #333', flexShrink: 0 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}><span style={{fontWeight:'bold'}}>{away.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{away.score}</span></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}><span style={{fontWeight:'bold'}}>{home.team.abbreviation}</span><span style={{fontWeight:'bold'}}>{home.score}</span></div><div style={{ fontSize: '10px', color: '#28a745' }}>{game.status.type.shortDetail}</div></div>) })}</div></div>
                 
                 {/* RULES & POT */}
@@ -461,7 +436,7 @@ function App() {
               </div>
             )}
 
-            {/* ... OTHER VIEWS (PROJECTIONS, MATRIX, WINNERS) ... */}
+            {/* === PROJECTIONS === */}
             {view === 'projections' && (
                 <div style={{ maxWidth: '800px', margin: '0 auto', backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', overflow:'hidden' }}>
                      {getDeclaredWinner() && (
@@ -511,7 +486,14 @@ function App() {
                             const color = Number(currentWeek) < 12 ? getCellColor(pick, g.winner) : (showPicks && pick ? (g.winner ? getCellColor(pick, g.winner) : 'white') : '#666');
                             return <td key={g.id} style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', backgroundColor: showPicks ? color : 'transparent', color: showPicks && (pick === g.winner || !g.winner) ? 'black' : 'white' }}>{showPicks ? (pick || "-") : "🔒"}</td>
                           })}
-                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{showPicks ? (player.tiebreaker || "-") : "🔒"}</td>
+                          <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center' }}>{showPicks ? (player.tiebreaker || "-") : "🔒"}
+                            {/* Tiebreaker Diff Display (Works for Active & Final) */}
+                            {showPicks && player.tiebreaker && games.length > 0 && (
+                                <span style={{fontSize:'10px', color:'#888', display:'block'}}>
+                                    ({Math.abs(parseInt(player.tiebreaker) - (parseInt(games[games.length-1].competitions[0].competitors[0].score) + parseInt(games[games.length-1].competitions[0].competitors[1].score)))} off)
+                                </span>
+                            )}
+                          </td>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: '#28a745', fontWeight:'bold' }}>{getCorrectCountForPlayer(player)}</td>
                           <td style={{ padding: '10px', borderBottom: '1px solid #333', textAlign: 'center', color: 'gold' }}>{getProjectedWins(player)}</td>
                         </tr>
@@ -526,6 +508,7 @@ function App() {
             {view === 'winners' && (
                 <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '30px' }}>
                     <div style={{ backgroundColor: '#1e1e1e', borderRadius: '15px', border: '1px solid #333', padding:'20px' }}>
+                        {/* LIVE WINNER BANNER */}
                         {getDeclaredWinner() && (
                              <div style={{ backgroundColor: '#28a745', padding: '15px', textAlign: 'center', color: 'white', borderRadius:'10px', marginBottom:'20px' }}>
                                  <div style={{fontSize:'20px'}}>🏆 WEEK {currentWeek} WINNER 🏆</div>
