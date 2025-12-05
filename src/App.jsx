@@ -43,7 +43,8 @@ const OLD_WEEKS = {
   10: { games: [{ id: '1', shortName: 'LV@DEN', winner: 'DEN', away: 'LV', home: 'DEN' },{ id: '2', shortName: 'ATL@IND', winner: 'IND', away: 'ATL', home: 'IND' },{ id: '3', shortName: 'BUF@MIA', winner: 'BUF', away: 'BUF', home: 'MIA' },{ id: '4', shortName: 'BAL@MIN', winner: 'BAL', away: 'BAL', home: 'MIN' },{ id: '5', shortName: 'CLE@NYJ', winner: 'CLE', away: 'CLE', home: 'NYJ' },{ id: '6', shortName: 'NE@TB', winner: 'NE', away: 'NE', home: 'TB' },{ id: '7', shortName: 'NO@CAR', winner: 'NO', away: 'NO', home: 'CAR' },{ id: '8', shortName: 'JAX@HOU', winner: 'JAX', away: 'JAX', home: 'HOU' },{ id: '9', shortName: 'NYG@CHI', winner: 'NYG', away: 'NYG', home: 'CHI' },{ id: '10', shortName: 'ARI@SEA', winner: 'ARI', away: 'ARI', home: 'SEA' },{ id: '11', shortName: 'LAR@SF', winner: 'LAR', away: 'LAR', home: 'SF' },{ id: '12', shortName: 'DET@WSH', winner: 'DET', away: 'DET', home: 'WSH' },{ id: '13', shortName: 'PIT@LAC', winner: 'PIT', away: 'PIT', home: 'LAC' },{ id: '14', shortName: 'PHI@GB', winner: 'PHI', away: 'PHI', home: 'GB' }], picks: [] }
 };
 
-const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3'];
+// 🔊 SOUNDS (Added fart.mp3)
+const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3', '/fart.mp3'];
 
 function App() {
   const [user, setUser] = useState(null);
@@ -76,8 +77,10 @@ function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const userPicksLoadedRef = useRef(false);
 
+  // 🔊 Audio Logic
   const introRef = useRef(new Audio('/intro.mp3'));
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []); 
+  const soundQueueRef = useRef([]); // Stores the rotation order
   const musicPlayedRef = useRef(false);
   const sanitizeEmail = (email) => email ? email.replace(/\./g, '_') : "";
 
@@ -219,7 +222,7 @@ function App() {
       return pastScore + (Number(currentWeek) >= 14 ? getCorrectCountForPlayer(player) : 0);
   };
 
-  // 🔥 UPDATED ALGORITHM: EXPONENTIAL STRENGTH
+  // 🔥 EXPONENTIAL STRENGTH MATH (Retained from Turn 64)
   const getWinProbability = (player, allPlayers) => {
       if (!games.length) return 0;
       const correct = getCorrectCountForPlayer(player);
@@ -233,8 +236,7 @@ function App() {
       // 2. Clinch
       if (remaining === 0) return correct === leaderScore ? 100 : 0;
 
-      // 3. Weighted Strength (Current Wins worth 50, Projected Wins SQUARED)
-      // Squaring the projection makes 13 (169) worth way more than 8 (64)
+      // 3. Weighted Strength (Current Wins * 50 + Projected Wins SQUARED)
       const calculateStrength = (p) => {
           const pCorrect = getCorrectCountForPlayer(p);
           const pProj = getProjectedWins(p);
@@ -290,19 +292,48 @@ function App() {
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
   const handleLogout = () => { auth.signOut(); window.location.reload(); };
 
+  // 🔊 SELECT TEAM WITH SOUND ROTATION
   const selectTeam = (gameId, teamAbbr, oddsString, targetPicksState, setTargetPicksState) => {
     if (hasSubmitted && !setTargetPicksState) return;
     const setPicksFunc = setTargetPicksState || setPicks;
     setPicksFunc((prev) => ({ ...prev, [gameId]: teamAbbr }));
+    
+    // Check for Underdog Logic
     if (oddsString && (oddsString.includes('+') || oddsString.includes('-'))) {
       const match = oddsString.match(/([A-Z]{2,3})\s*([+-]?)(\d+\.?\d*)/); 
       if (match) {
         const [full, teamInOdds, sign, num] = match;
         const magnitude = parseFloat(num);
         if (magnitude >= 8) {
-            if ((sign === '-' && teamAbbr !== teamInOdds) || (sign === '+' && teamAbbr === teamInOdds)) { 
-                const randomIndex = Math.floor(Math.random() * funnySounds.length);
-                try { funnySounds[randomIndex].currentTime = 0; funnySounds[randomIndex].play(); } catch(e) {}
+            // If user picked the team in the odds (the Favorite in -8, or Underdog in +8), check logic
+            // Actually, sound plays on UNDERDOG pick.
+            // If odds are "KC -10", KC is favorite. If I pick opponent (not KC), play sound.
+            // If odds are "NYJ +10", NYJ is underdog. If I pick NYJ, play sound.
+            let isUnderdogPick = false;
+            if (sign === '-' && teamAbbr !== teamInOdds) isUnderdogPick = true;
+            if (sign === '+' && teamAbbr === teamInOdds) isUnderdogPick = true;
+
+            if (isUnderdogPick) {
+                // 🃏 SHUFFLE BAG LOGIC
+                let queue = soundQueueRef.current;
+                
+                // If queue is empty, refill and shuffle indices [0, 1, 2, 3]
+                if (queue.length === 0) {
+                    queue = Array.from({ length: funnySounds.length }, (_, i) => i);
+                    // Fisher-Yates Shuffle
+                    for (let i = queue.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [queue[i], queue[j]] = [queue[j], queue[i]];
+                    }
+                    soundQueueRef.current = queue;
+                }
+
+                // Play next in queue
+                const indexToPlay = queue.pop(); 
+                try { 
+                    funnySounds[indexToPlay].currentTime = 0; 
+                    funnySounds[indexToPlay].play(); 
+                } catch(e) {}
             }
         }
       }
