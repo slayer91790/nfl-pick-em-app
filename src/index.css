@@ -305,6 +305,7 @@ button { font-family: var(--font-body); }
 .game-card-top .odds { color: var(--gold); }
 .game-card-teams { display: flex; align-items: stretch; padding: 12px; gap: 8px; }
 .team-tile {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -332,6 +333,30 @@ button { font-family: var(--font-body); }
 .team-tile img { width: 46px; height: 46px; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5)); }
 .team-logo-fallback { font-size: 34px; line-height: 46px; }
 .vs { display: flex; align-items: center; color: var(--muted); font-weight: 700; font-size: 12px; }
+
+/* Survivor: gold selection + spent teams */
+.team-tile.selected-gold {
+  border-color: var(--gold);
+  background: var(--gold-dim);
+  box-shadow: 0 0 22px rgba(255, 201, 77, 0.22), inset 0 0 18px rgba(255, 201, 77, 0.06);
+}
+.team-tile.selected-gold.noclick:hover { background: var(--gold-dim); }
+.team-tile.used { opacity: 0.3; text-decoration: line-through; cursor: not-allowed; }
+.team-tile.used:hover { background: transparent; }
+
+/* ⚡ Power Points potential-value badge */
+.pt-badge {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-body);
+  padding: 1px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted);
+}
+.pt-badge.pt2 { background: rgba(79, 140, 255, 0.16); color: var(--blue); }
+.pt-badge.pt3 { background: var(--gold-dim); color: var(--gold); }
 
 .tb-card { grid-column: 1 / -1; text-align: center; padding: 22px; }
 .tb-input {
@@ -459,8 +484,29 @@ button { font-family: var(--font-body); }
 .ticker-track { white-space: nowrap; animation: ticker 40s linear infinite; padding-left: 100%; font-size: 13px; color: #c9d2e3; }
 .ticker-track span { margin-right: 48px; }
 
+/* 💀 Underdog skull pop (synced with the funny-sound trigger) */
+.skull-pop {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  font-size: 34px;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 5;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6));
+  animation: skullPop 1.2s ease-out forwards;
+}
+
 /* ---------- Animations ---------- */
 @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+@keyframes skullPop {
+  0%   { transform: translate(-50%, 0) scale(0.3) rotate(0deg); opacity: 0; }
+  15%  { transform: translate(-50%, -10px) scale(1.3) rotate(-14deg); opacity: 1; }
+  30%  { transform: translate(-50%, -18px) scale(1) rotate(12deg); }
+  45%  { transform: translate(-50%, -28px) scale(1.12) rotate(-9deg); }
+  60%  { transform: translate(-50%, -40px) scale(1) rotate(6deg); opacity: 0.9; }
+  100% { transform: translate(-50%, -68px) scale(0.85) rotate(0deg); opacity: 0; }
+}
 @keyframes shine { 0%, 60% { left: -80%; } 100% { left: 130%; } }
 @keyframes hover { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-12px) rotate(4deg); } }
 @keyframes pulseGlow { 0%, 100% { box-shadow: 0 8px 40px rgba(0, 229, 137, 0.35); } 50% { box-shadow: 0 8px 55px rgba(0, 229, 137, 0.6); } }

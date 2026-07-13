@@ -37,7 +37,8 @@ service cloud.firestore {
 
     // Payment flags are admin-only; enumerated because rules can't wildcard key names.
     function paidFields() {
-      return ['paid_week1', 'paid_week2', 'paid_week3', 'paid_week4', 'paid_week5',
+      return ['survivor_paid',
+              'paid_week1', 'paid_week2', 'paid_week3', 'paid_week4', 'paid_week5',
               'paid_week6', 'paid_week7', 'paid_week8', 'paid_week9', 'paid_week10',
               'paid_week11', 'paid_week12', 'paid_week13', 'paid_week14', 'paid_week15',
               'paid_week16', 'paid_week17', 'paid_week18'];

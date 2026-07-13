@@ -6,10 +6,11 @@ import { onAuthStateChanged } from 'firebase/auth';
 // --- SEASON CONFIGURATION ---
 // 👉 To roll over to a new season, change SEASON below. Everything else
 // (Firestore collection, week detection, archives) follows automatically.
-const SEASON = 2025;
+const SEASON = 2026;
 const PICKS_COLLECTION = `picks_${SEASON}`;
 const ENTRY_FEE = 10;
-const DOUBLE_FEE_WEEK = 13; // Thanksgiving "Double Gobble" week ($20)
+const DOUBLE_FEE_WEEK = 12; // Thanksgiving "Double Gobble" week ($20) — Nov 26, 2026 is NFL Week 12; re-check each season!
+const SURVIVOR_FEE = 20;    // 🛡️ Survivor Pool: optional, one-time entry for the whole season
 
 // Admins — keep in sync with the list in firestore.rules
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
@@ -62,6 +63,8 @@ function App() {
   const [phoneNumbers, setPhoneNumbers] = useState({}); // admin-only (config/private)
   const [databaseWinners, setDatabaseWinners] = useState({});
   const [picksVisible, setPicksVisible] = useState(false);
+  const [powerScores, setPowerScores] = useState({});   // ⚡ finalized odds-weighted scores per week (config)
+  const [pastResults, setPastResults] = useState({});   // 🛡️ { week: { winners:[], ties:[] } } for Survivor eliminations
 
   const [newEmailInput, setNewEmailInput] = useState("");
   const [newNicknameInput, setNewNicknameInput] = useState("");
@@ -74,7 +77,11 @@ function App() {
   const [adminProfileEmail, setAdminProfileEmail] = useState("");
   const [adminProfilePhone, setAdminProfilePhone] = useState("");
 
+  const [skullPop, setSkullPop] = useState(null); // 💀 { gameId, side } — synced to the underdog sound
+  const skullTimerRef = useRef(null);
+
   const legacyPhonesRef = useRef(null); // phones found in config/settings (pre-migration)
+  const fetchedWeeksRef = useRef(new Set()); // past weeks already fetched for Survivor results
 
   // 🔊 Audio Logic (Shuffle Bag)
   const introRef = useRef(new Audio('/intro.mp3'));
@@ -115,6 +122,7 @@ function App() {
       setNicknames(data.nicknames || {});
       setDatabaseWinners(data.winners || {});
       setPicksVisible(data.picksVisible || false);
+      setPowerScores(data.powerScores || {});
       if (data.phones) legacyPhonesRef.current = data.phones;
 
       const email = user.email.toLowerCase();
@@ -153,14 +161,19 @@ function App() {
         const comp = g.competitions[0].competitors;
         weekPicks[g.id] = comp[(idx + i) % 2]?.team.abbreviation;
       });
+      const firstGame = games[idx % games.length];
       return {
         userId: idx === 0 ? 'preview-me' : `preview-${idx}`,
         userName: n, photo: '',
         [`week${currentWeek}`]: weekPicks,
         [`tiebreaker_week${currentWeek}`]: String(38 + idx * 3),
-        [`paid_week${currentWeek}`]: idx % 3 !== 0
+        [`paid_week${currentWeek}`]: idx % 3 !== 0,
+        survivor_optIn: idx < 6,
+        survivor_paid: idx < 6 && idx % 2 === 0,
+        [`survivor_week${currentWeek}`]: idx < 6 ? weekPicks[firstGame.id] : undefined
       };
     }));
+    setPowerScores({ [currentWeek]: Object.fromEntries(names.map((_, i) => [i === 0 ? 'preview-me' : `preview-${i}`, 22 - i * 2])) });
   }, [games, currentWeek]);
 
   // --- 4. Phones (admin-only doc, with one-time migration from config/settings) ---
@@ -182,6 +195,32 @@ function App() {
     }, (err) => console.error("Private config listener failed", err));
     return () => unsubscribe();
   }, [allowed, isAdmin]);
+
+  // --- 4b. Past weeks' winners (fetched once per week, for Survivor eliminations) ---
+  useEffect(() => {
+    if (!allowed && !PREVIEW) return;
+    let cancelled = false;
+    const load = async () => {
+      for (let w = 1; w < currentWeek; w++) {
+        if (fetchedWeeksRef.current.has(w)) continue;
+        fetchedWeeksRef.current.add(w);
+        try {
+          const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${w}&seasontype=2&dates=${SEASON}`);
+          const data = await res.json();
+          const winners = [], ties = [];
+          (data.events || []).forEach(g => {
+            const comp = g.competitions?.[0]?.competitors || [];
+            const win = comp.find(c => c.winner === true);
+            if (win) winners.push(win.team.abbreviation);
+            else if (g.status?.type?.state === 'post') comp.forEach(c => ties.push(c.team.abbreviation));
+          });
+          if (!cancelled) setPastResults(prev => ({ ...prev, [w]: { winners, ties } }));
+        } catch { fetchedWeeksRef.current.delete(w); /* retry next time */ }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [allowed, currentWeek]);
 
   // --- 5. Auto-detect the current NFL week on load ---
   useEffect(() => {
@@ -288,6 +327,57 @@ function App() {
         }
     });
     return score;
+  };
+
+  // ⚡ POWER POINTS (experimental 2026): same picks, odds-weighted scoring.
+  // Win with a favorite = 1 pt · underdog by less than 7 = 2 pts · 7+ point underdog = 3 pts.
+  const getPickPointValue = (game, pick) => {
+    if (!pick) return 0;
+    const match = (game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/); // ESPN details, e.g. "KC -7.5"
+    if (!match) return 1; // pick'em or no line posted
+    const [, favTeam, numStr] = match;
+    if (pick === favTeam) return 1;
+    return parseFloat(numStr) >= 7 ? 3 : 2;
+  };
+  const getPowerPointsForPlayer = (player) => {
+    const weekPicks = player[`week${currentWeek}`] || {};
+    let pts = 0;
+    games.forEach(g => { if (g.winner && weekPicks[g.id] === g.winner) pts += getPickPointValue(g, weekPicks[g.id]); });
+    return pts;
+  };
+  const getSeasonPowerStandings = () => {
+    const totals = {};
+    Object.values(powerScores).forEach(weekMap => {
+      Object.entries(weekMap || {}).forEach(([uid, pts]) => { totals[uid] = (totals[uid] || 0) + pts; });
+    });
+    return Object.entries(totals)
+      .map(([uid, pts]) => ({ uid, pts, player: leaders.find(l => l.userId === uid) }))
+      .filter(e => e.player)
+      .sort((a, b) => b.pts - a.pts);
+  };
+
+  // 🛡️ SURVIVOR POOL
+  const findGameForTeam = (abbr) => games.find(g => (g.competitions?.[0]?.competitors || []).some(c => c.team.abbreviation === abbr));
+  const getSurvivorPlayers = () => leaders.filter(l => l.survivor_optIn === true);
+  const getSurvivorState = (player) => {
+    if (!player || player.survivor_optIn !== true) return { joined: false, alive: false, teamsUsed: [], eliminatedWeek: null, currentPick: null };
+    const teamsUsed = [];
+    let alive = true, eliminatedWeek = null;
+    for (let w = 1; w <= currentWeek; w++) {
+      const pick = player[`survivor_week${w}`];
+      if (pick) teamsUsed.push(pick);
+      if (w < currentWeek) {
+        if (!pick) { alive = false; eliminatedWeek = w; break; } // missed a week = out
+        const results = pastResults[w];
+        if (!results) continue; // results still loading — assume alive for now
+        if (!results.winners.includes(pick) && !results.ties.includes(pick)) { alive = false; eliminatedWeek = w; break; }
+      } else if (pick) {
+        const g = findGameForTeam(pick);
+        if (g && g.winner && g.winner !== pick) { alive = false; eliminatedWeek = w; } // lost live this week
+        // win, tie, or still playing → alive
+      }
+    }
+    return { joined: true, alive, eliminatedWeek, teamsUsed, currentPick: player[`survivor_week${currentWeek}`] || null };
   };
 
   // Monday Night game = latest kickoff of the week; total only counts once it's final
@@ -414,6 +504,11 @@ function App() {
             if (sign === '+' && teamAbbr === teamInOdds) isUnderdogPick = true;
 
             if (isUnderdogPick) {
+                // 💀 Skull pop synced with the funny sound
+                setSkullPop({ gameId: game.id, side: teamAbbr });
+                clearTimeout(skullTimerRef.current);
+                skullTimerRef.current = setTimeout(() => setSkullPop(null), 1200);
+
                 // 🃏 SHUFFLE BAG LOGIC
                 let queue = soundQueueRef.current;
                 if (queue.length === 0) {
@@ -455,7 +550,45 @@ function App() {
     } catch (error) { console.error(error); alert("Error saving picks: " + error.message); }
   };
 
+  // --- SURVIVOR ACTIONS ---
+  const joinSurvivor = async () => {
+    if (!user) return;
+    if (!window.confirm(`Join the Survivor Pool? One-time $${SURVIVOR_FEE} entry (pay on Venmo).\n\nPick ONE team each week — win and you survive, lose and you're out. Each team can only be used once all season.`)) return;
+    try {
+      await setDoc(doc(db, PICKS_COLLECTION, user.uid), {
+        userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
+        survivor_optIn: true
+      }, { merge: true });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const pickSurvivorTeam = async (game, abbr) => {
+    if (!user) return;
+    const me = leaders.find(l => l.userId === user.uid);
+    const state = getSurvivorState(me);
+    if (!state.joined || !state.alive) return;
+    if (isGameLocked(game)) { alert("That game already kicked off."); return; }
+    if (state.currentPick) {
+      const curGame = findGameForTeam(state.currentPick);
+      if (curGame && isGameLocked(curGame)) { alert("Your pick is locked — that team's game already started."); return; }
+    }
+    const usedBefore = state.teamsUsed.filter(t => t !== state.currentPick);
+    if (usedBefore.includes(abbr)) { alert(`You already used ${abbr} this season.`); return; }
+    if (!window.confirm(`Use ${abbr} for Week ${currentWeek}? You won't be able to pick them again this season.`)) return;
+    try {
+      await setDoc(doc(db, PICKS_COLLECTION, user.uid), {
+        userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
+        [`survivor_week${currentWeek}`]: abbr,
+        [`survivor_week${currentWeek}_pickedAt`]: serverTimestamp()
+      }, { merge: true });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+
   // --- ADMIN ACTIONS ---
+  const toggleSurvivorPaid = async (userId, currentStatus) => {
+     try {
+       await updateDoc(doc(db, PICKS_COLLECTION, userId), { survivor_paid: !currentStatus });
+     } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
   const toggleSelectUser = (userId) => { setSelectedPaidUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]); };
   const toggleSelectAll = () => { if (selectedPaidUsers.length === leaders.length) { setSelectedPaidUsers([]); } else { setSelectedPaidUsers(leaders.map(l => l.userId)); } };
 
@@ -499,7 +632,11 @@ function App() {
       if (!winner) { alert("No winner calculated yet."); return; }
       const name = getDisplayName(winner);
       if (!window.confirm(`Declare ${name} as Week ${currentWeek} Winner?`)) return;
-      await updateDoc(doc(db, "config", "settings"), { [`winners.${currentWeek}`]: name });
+      await updateDoc(doc(db, "config", "settings"), {
+        [`winners.${currentWeek}`]: name,
+        // snapshot this week's ⚡ Power Points so season standings survive ESPN odds disappearing
+        [`powerScores.${currentWeek}`]: Object.fromEntries(leaders.map(p => [p.userId, getPowerPointsForPlayer(p)]))
+      });
       alert("✅ Winner Saved!");
   };
   const addGuest = async () => {
@@ -551,15 +688,21 @@ function App() {
           const myPick = targetPicks[game.id];
           const locked = !adminMode && (hasSubmitted || isGameLocked(game));
           const pickTeam = (abbr) => selectTeam(game, abbr, targetPicks, setTargetPicks, adminMode);
-          const tile = (side) => (
-            <div
-              className={`team-tile ${myPick === side.team.abbreviation ? 'selected' : ''} ${locked ? 'noclick' : ''}`}
-              onClick={locked ? undefined : () => pickTeam(side.team.abbreviation)}
-            >
-              {side.team.logo ? <img src={side.team.logo} alt={side.team.abbreviation} /> : <div className="team-logo-fallback">🏈</div>}
-              <div>{side.team.abbreviation}</div>
-            </div>
-          );
+          const tile = (side) => {
+            const abbr = side.team.abbreviation;
+            const ptVal = getPickPointValue(game, abbr);
+            return (
+              <div
+                className={`team-tile ${myPick === abbr ? 'selected' : ''} ${locked ? 'noclick' : ''}`}
+                onClick={locked ? undefined : () => pickTeam(abbr)}
+              >
+                {side.team.logo ? <img src={side.team.logo} alt={abbr} /> : <div className="team-logo-fallback">🏈</div>}
+                <div>{abbr}</div>
+                {odds && <span className={`pt-badge ${ptVal === 3 ? 'pt3' : ptVal === 2 ? 'pt2' : ''}`}>⚡{ptVal}</span>}
+                {skullPop && skullPop.gameId === game.id && skullPop.side === abbr && <span className="skull-pop">💀</span>}
+              </div>
+            );
+          };
           return (
             <div key={game.id} className={`game-card ${locked ? 'locked' : ''}`} style={{ animationDelay: `${Math.min(i * 40, 400)}ms` }}>
               <div className="game-card-top">
@@ -610,6 +753,7 @@ function App() {
             <button className={`tab ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>Dashboard</button>
             <button className={`tab ${view === 'picks' ? 'active' : ''}`} onClick={() => setView('picks')}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
             <button className={`tab ${view === 'matrix' ? 'active' : ''}`} onClick={() => setView('matrix')}>All Picks</button>
+            <button className={`tab ${view === 'survivor' ? 'active' : ''}`} onClick={() => setView('survivor')}>🛡️ Survivor</button>
             <button className={`tab ${view === 'winners' ? 'active' : ''}`} onClick={() => setView('winners')}>Winners</button>
             {isAdmin && <button className={`tab admin ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>👑 Admin</button>}
           </nav>
@@ -711,7 +855,7 @@ function App() {
                     <thead><tr>
                       <th className="matrix-sticky">Player</th>
                       {games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id}>{away}</th> })}
-                      <th>Tie</th><th>Correct</th><th style={{ color: 'var(--gold)' }}>Proj</th><th style={{ color: 'var(--accent)' }}>Win %</th>
+                      <th>Tie</th><th>Correct</th><th style={{ color: 'var(--blue)' }}>⚡Pwr</th><th style={{ color: 'var(--gold)' }}>Proj</th><th style={{ color: 'var(--accent)' }}>Win %</th>
                     </tr></thead>
                     <tbody>
                       {[...leaders].sort((a,b) => getCorrectCountForPlayer(b) - getCorrectCountForPlayer(a)).map(player => {
@@ -742,6 +886,7 @@ function App() {
                               )}
                             </td>
                             <td style={{ color: 'var(--accent)', fontWeight: 800 }}>{getCorrectCountForPlayer(player)}</td>
+                            <td style={{ color: 'var(--blue)', fontWeight: 800 }}>{getPowerPointsForPlayer(player)}</td>
                             <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{getProjectedWins(player)}</td>
                             <td style={{ fontWeight: 800, color: prob > 0 ? 'var(--accent)' : 'var(--muted)' }}>
                               {isDeclared ? "🏆" : prob === 0 ? "❌" : prob >= 100 ? "99%" : `${prob}%`}
@@ -768,6 +913,7 @@ function App() {
                   <div className="row" style={{ background: 'rgba(255,255,255,0.03)', justifyContent: 'center' }}>
                     <span className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>🏅 Weekly Winners</span>
                   </div>
+                  {getCombinedWeeklyWinners().length === 0 && <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>No winners yet — season starts soon 🏈</div>}
                   {getCombinedWeeklyWinners().map(w => (
                     <div key={w.week} className="row">
                       <span style={{ color: 'var(--muted)', fontWeight: 700, fontSize: '13px' }}>Week {w.week}</span>
@@ -775,8 +921,139 @@ function App() {
                     </div>
                   ))}
                 </div>
+
+                {/* ⚡ POWER STANDINGS (experimental parallel game) */}
+                <div className="glass" style={{ overflow: 'hidden', marginTop: '20px' }}>
+                  <div className="row" style={{ background: 'rgba(255,255,255,0.03)', justifyContent: 'center' }}>
+                    <span className="section-label" style={{ margin: 0, color: 'var(--blue)' }}>⚡ Power Standings · Trial Season</span>
+                  </div>
+                  <div style={{ padding: '10px 18px 0 18px', fontSize: '11px', color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
+                    Same weekly picks, scored by risk: favorite win = 1 pt · underdog win = 2 pts · 7+ point underdog win = 3 pts. Bragging rights only this year.
+                  </div>
+                  {getSeasonPowerStandings().length === 0
+                    ? <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Standings appear after the first week is finalized.</div>
+                    : getSeasonPowerStandings().map((e, i) => (
+                      <div key={e.uid} className="row">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: 'var(--muted)', fontWeight: 700, width: '22px' }}>{i + 1}.</span>
+                          <span style={{ fontWeight: 700 }}>{getDisplayName(e.player)}</span>
+                        </div>
+                        <span style={{ fontWeight: 800, color: 'var(--blue)' }}>⚡ {e.pts}</span>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
+
+            {/* === 🛡️ SURVIVOR POOL === */}
+            {view === 'survivor' && (() => {
+              const me = user ? leaders.find(l => l.userId === user.uid) : null;
+              const myState = getSurvivorState(me);
+              const pool = getSurvivorPlayers();
+              const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
+              const usedBefore = myState.teamsUsed.filter(t => t !== myState.currentPick);
+              const myPickGame = myState.currentPick ? findGameForTeam(myState.currentPick) : null;
+              const myPickLocked = myPickGame ? isGameLocked(myPickGame) : false;
+              const canPick = myState.joined && myState.alive && !myPickLocked;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  <div className="pot-card" style={{ borderColor: 'rgba(255,201,77,0.4)' }}>
+                    <div className="pot-label" style={{ color: 'var(--gold)' }}>🛡️ Survivor Pool · Optional Side Game</div>
+                    <div className="pot-amount">${pool.length * SURVIVOR_FEE}</div>
+                    <div className="pot-sub">{pool.length} entered · {aliveCount} alive · ${SURVIVOR_FEE} one-time entry · last one standing takes all</div>
+                    {!myState.joined
+                      ? <button className="btn btn-gold" style={{ fontSize: '15px', padding: '13px 28px' }} onClick={joinSurvivor}>Join Survivor Pool (${SURVIVOR_FEE})</button>
+                      : <span className={`pill ${myState.alive ? 'pill-green' : 'pill-red'}`} style={{ fontSize: '13px', padding: '8px 18px' }}>{myState.alive ? '💪 YOU ARE ALIVE' : `💀 ELIMINATED · WEEK ${myState.eliminatedWeek}`}</span>}
+                  </div>
+
+                  <div className="glass" style={{ padding: '18px 22px' }}>
+                    <h3 style={{ margin: '0 0 10px 0', color: 'var(--muted)', fontSize: '14px' }}>How it works</h3>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--muted)', lineHeight: 1.8 }}>
+                      <li>Pick ONE team to win each week. Win → survive. Lose → out.</li>
+                      <li>Each team can only be used ONCE all season — spend the big favorites wisely.</li>
+                      <li>Miss a week and you're out. Join before Week 1 kickoff.</li>
+                      <li>You can switch your pick until your chosen team's game kicks off. Picks reveal at kickoff.</li>
+                      <li>If multiple players survive Week 18, the pot splits.</li>
+                    </ul>
+                  </div>
+
+                  {myState.joined && myState.alive && games.length > 0 && (
+                    <div>
+                      <div className="section-label">
+                        {myState.currentPick
+                          ? `Week ${currentWeek} pick: ${myState.currentPick}${myPickLocked ? ' 🔒 locked in' : ' — tap another team to switch'}`
+                          : `Pick your Week ${currentWeek} team`}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '14px' }}>
+                        {games.map(game => {
+                          const home = game.competitions[0].competitors.find(c => c.homeAway === 'home');
+                          const away = game.competitions[0].competitors.find(c => c.homeAway === 'away');
+                          if (!home || !away) return null;
+                          const locked = isGameLocked(game);
+                          const tile = (side) => {
+                            const abbr = side.team.abbreviation;
+                            const used = usedBefore.includes(abbr);
+                            const isSel = myState.currentPick === abbr;
+                            const clickable = canPick && !locked && !used;
+                            return (
+                              <div className={`team-tile ${isSel ? 'selected-gold' : ''} ${used ? 'used' : ''} ${clickable ? '' : 'noclick'}`} onClick={clickable ? () => pickSurvivorTeam(game, abbr) : undefined}>
+                                {side.team.logo ? <img src={side.team.logo} alt={abbr} /> : <div className="team-logo-fallback">🏈</div>}
+                                <div>{abbr}</div>
+                                {used && <span className="pt-badge">USED</span>}
+                              </div>
+                            );
+                          };
+                          return (
+                            <div key={game.id} className={`game-card ${locked ? 'locked' : ''}`}>
+                              <div className="game-card-top">
+                                <span>{locked ? '🔒 ' : ''}{game.status.type.shortDetail}</span>
+                                <span className="odds">{game.oddsString || ""}</span>
+                              </div>
+                              <div className="game-card-teams">
+                                {tile(away)}
+                                <div className="vs">@</div>
+                                {tile(home)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Survivor board */}
+                  <div className="glass" style={{ overflow: 'hidden' }}>
+                    <div className="row" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <span className="section-label" style={{ margin: 0 }}>Survivor Board</span>
+                      <span className="section-label" style={{ margin: 0 }}>Week {currentWeek} Pick</span>
+                    </div>
+                    {pool.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)' }}>Nobody has joined yet — be the first 🛡️</div>}
+                    {[...pool].sort((a, b) => (getSurvivorState(b).alive ? 1 : 0) - (getSurvivorState(a).alive ? 1 : 0)).map(p => {
+                      const st = getSurvivorState(p);
+                      const isSelf = user && p.userId === user.uid;
+                      const pickGame = st.currentPick ? findGameForTeam(st.currentPick) : null;
+                      const showPick = picksVisible || isAdmin || isSelf || (pickGame && isGameLocked(pickGame));
+                      const shownUsed = st.teamsUsed.filter(t => showPick || t !== st.currentPick);
+                      return (
+                        <div key={p.userId} className="row">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <Avatar src={p.photo} name={getDisplayName(p)} />
+                            <div>
+                              <div style={{ fontWeight: 700 }}>{getDisplayName(p)}{p.survivor_paid !== true && <span className="pill pill-red" style={{ marginLeft: '8px' }}>UNPAID</span>}</div>
+                              {shownUsed.length > 0 && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>Used: {shownUsed.join(' · ')}</div>}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontWeight: 800 }}>{st.currentPick ? (showPick ? st.currentPick : '🔒') : '—'}</span>
+                            <span className={`pill ${st.alive ? 'pill-green' : 'pill-red'}`}>{st.alive ? 'ALIVE' : `OUT W${st.eliminatedWeek}`}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* === PICKS === */}
             {view === 'picks' && (
@@ -827,7 +1104,7 @@ function App() {
                       <button className="btn btn-green" onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0}>Mark Selected as Paid</button>
                   </div>
                   <table className="matrix-table">
-                    <thead><tr><th className="matrix-sticky">Player</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
+                    <thead><tr><th className="matrix-sticky">Player</th><th style={{ color: 'var(--gold)' }}>🛡️SURV</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
                     <tbody>
                       {leaders.map(player => (
                         <tr key={player.userId}>
@@ -836,6 +1113,11 @@ function App() {
                               <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} />
                               {getDisplayName(player)}
                             </label>
+                          </td>
+                          <td>
+                            {player.survivor_optIn === true
+                              ? <button onClick={() => toggleSurvivorPaid(player.userId, player.survivor_paid === true)} className="cell-chip" style={{ cursor: 'pointer', border: 'none', background: player.survivor_paid === true ? 'var(--gold-dim)' : 'rgba(255,255,255,0.05)', color: player.survivor_paid === true ? 'var(--gold)' : 'var(--muted)' }}>{player.survivor_paid === true ? '$' : '–'}</button>
+                              : <span style={{ color: 'var(--muted)' }}>·</span>}
                           </td>
                           {[...Array(18)].map((_, i) => i + 1).map(w => {
                             const isPaid = player[`paid_week${w}`] === true;

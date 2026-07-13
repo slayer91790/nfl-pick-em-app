@@ -11,8 +11,16 @@ sign-in + Firestore), live scores/odds/news from ESPN's public API.
   Everyone's pick for a game is revealed automatically once that game kicks off.
 - **Winner**: highest correct count when all games are final (MNF tiebreaker breaks ties),
   or earlier if mathematically clinched. Admins can also finalize a winner manually.
-- **Admins** manage the guest list, enter picks on behalf of players, track weekly
-  payments, and reveal all picks manually if needed.
+- **⚡ Power Points** (trial for 2026): the same weekly picks scored a second way —
+  favorite win = 1 pt, underdog win = 2 pts, 7+ point underdog win = 3 pts. Weekly points
+  show in the All Picks matrix; season standings (on the Winners page) accumulate each
+  time an admin finalizes a week. Bragging rights only this year.
+- **🛡️ Survivor Pool** (optional side game, $20 one-time entry): pick ONE team to win
+  each week, each team usable once per season. Lose or miss a week and you're out;
+  last player standing takes the survivor pot (split if multiple survive week 18).
+  Picks can be switched until the chosen team's game kicks off, and reveal at kickoff.
+- **Admins** manage the guest list, enter picks on behalf of players, track weekly +
+  survivor payments, and reveal all picks manually if needed.
 
 ## Security model (important!)
 
@@ -36,14 +44,16 @@ firebase deploy --only firestore:rules
 Until the rules are deployed, the database is only as protected as whatever rules are
 currently active in the Firebase console — check them.
 
-## Season rollover checklist (e.g. 2025 → 2026)
+## Season rollover checklist (e.g. 2026 → 2027)
 
-1. In `src/App.jsx`, change `const SEASON = 2025` to the new year. That switches the
-   Firestore collection to `picks_2026`, keeps 2025 history archived, and the current
-   week auto-detects from ESPN.
-2. Optionally move last season's declared winners from `config/settings.winners` into
-   the archive constants if you want them shown historically.
-3. Done — the allowlist, nicknames, and phones carry over automatically.
+1. In `src/App.jsx`, change `const SEASON = 2026` to the new year. That switches the
+   Firestore collection to `picks_2027` and the current week auto-detects from ESPN.
+2. Update `DOUBLE_FEE_WEEK` — check which NFL week contains Thanksgiving that year
+   (it was week 13 in 2025 and week 12 in 2026).
+3. Optionally move last season's declared winners from `config/settings.winners` into
+   the archive constants if you want them shown historically, and clear
+   `config/settings.winners` / `powerScores` for the fresh season.
+4. Done — the allowlist, nicknames, and phones carry over automatically.
 
 ## Development
 
@@ -62,4 +72,7 @@ or Firebase needed. Preview mode is stripped from production builds.
 |---|---|---|
 | `config/settings` | `allowedEmails`, `nicknames`, `winners`, `picksVisible` | admins |
 | `config/private` | `phones` (keyed by email with `.` → `_`) | admins |
-| `picks_<season>/<uid>` | `week<N>` picks map, `tiebreaker_week<N>`, `week<N>_submittedAt`, `paid_week<N>` | owner (except paid flags), admins |
+| `picks_<season>/<uid>` | `week<N>` picks map, `tiebreaker_week<N>`, `week<N>_submittedAt`, `paid_week<N>`, `survivor_optIn`, `survivor_week<N>`, `survivor_paid` | owner (except paid flags), admins |
+
+`config/settings` also holds `powerScores.<week>` (⚡ snapshots written when an admin
+finalizes a week).
