@@ -631,14 +631,18 @@ function App() {
       }
     }
 
-    // 🎧 Regular pick click — skipped when the underdog clip already fired
+    // 🎧 Team-select stinger — once per week per device, and never over the underdog clip
     if (!playedUnderdogSound) {
+      const playedKey = `pep_teamselect_${SEASON}_w${currentWeek}`;
       try {
-        const s = selectSoundRef.current;
-        s.currentTime = 0;
-        s.volume = 0.6;
-        s.play().catch(() => {});
-      } catch { /* audio not ready */ }
+        if (!localStorage.getItem(playedKey)) {
+          const s = selectSoundRef.current;
+          s.currentTime = 0;
+          s.volume = 0.6;
+          s.play().catch(() => {});
+          localStorage.setItem(playedKey, '1');
+        }
+      } catch { /* audio or storage not available */ }
     }
   };
 
