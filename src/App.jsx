@@ -844,12 +844,10 @@ function App() {
 
   return (
     <div style={{ minHeight: '100vh', paddingBottom: '110px' }}>
-      <header className="topbar banner-topbar">
-        <img src="/header-banner.png" alt="" aria-hidden="true" className="banner-img" />
-        <div className="banner-scrim" />
-        <div className="logo banner-logo">🏈 <span>Pick 'Em <em>Pro</em></span><span className="season-chip">{SEASON} Season</span></div>
+      <header className="topbar">
+        <div className="logo">🏈 <span>Pick 'Em <em>Pro</em></span><span className="season-chip">{SEASON} Season</span></div>
         {user && allowed && (
-          <div className="topbar-controls">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Avatar src={user.photoURL} name={user.displayName} size={34} />
             <button className="btn btn-danger" style={{ padding: '6px 14px', fontSize: '12px' }} onClick={handleLogout}>Logout</button>
           </div>
