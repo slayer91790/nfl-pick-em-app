@@ -6,7 +6,10 @@ import { getFirestore } from "firebase/firestore";
 // Actual access control lives in firestore.rules — deploy those!
 const firebaseConfig = {
   apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI",
-  authDomain: "nfl-pick-em-2025.firebaseapp.com",
+  // Auth runs same-origin via the Netlify proxy in public/_redirects.
+  // If the site moves to a custom domain: update this, the _redirects file is
+  // domain-agnostic, and add <domain>/__/auth/handler to the Google OAuth client.
+  authDomain: "pickempro.netlify.app",
   projectId: "nfl-pick-em-2025",
   storageBucket: "nfl-pick-em-2025.firebasestorage.app",
   messagingSenderId: "684455829730",

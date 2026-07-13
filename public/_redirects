@@ -1,0 +1,5 @@
+# Proxy Firebase's auth handler through our own domain so Google sign-in is
+# same-origin (mobile browsers partition cross-site storage, which breaks
+# popup/redirect sign-in when authDomain is a different site).
+/__/auth/*  https://nfl-pick-em-2025.firebaseapp.com/__/auth/:splat  200
+/__/firebase/*  https://nfl-pick-em-2025.firebaseapp.com/__/firebase/:splat  200
