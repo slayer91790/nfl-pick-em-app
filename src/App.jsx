@@ -76,6 +76,8 @@ function App() {
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
   const [guestList, setGuestList] = useState([]);
+  const [adminEmails, setAdminEmails] = useState([]); // extra admins managed in-app (founders are hardcoded)
+  const [adminTab, setAdminTab] = useState('overview');
   const [nicknames, setNicknames] = useState({});
   const [phoneNumbers, setPhoneNumbers] = useState({}); // admin-only (config/private)
   const [databaseWinners, setDatabaseWinners] = useState({});
@@ -144,6 +146,7 @@ function App() {
       }
       const data = snap.data();
       setGuestList(data.allowedEmails || []);
+      setAdminEmails(data.adminEmails || []);
       setNicknames(data.nicknames || {});
       setDatabaseWinners(data.winners || {});
       setPicksVisible(data.picksVisible || false);
@@ -152,11 +155,12 @@ function App() {
       if (data.phones) legacyPhonesRef.current = data.phones;
 
       const email = user.email.toLowerCase();
-      const ok = isAdminEmail(email) || (data.allowedEmails || []).some(e => e.toLowerCase() === email);
+      const isDynamicAdmin = (data.adminEmails || []).some(e => e.toLowerCase() === email);
+      const ok = isAdminEmail(email) || isDynamicAdmin || (data.allowedEmails || []).some(e => e.toLowerCase() === email);
       if (!ok) { alert("🚫 Access Denied"); auth.signOut(); return; }
 
       setAllowed(true);
-      setIsAdmin(isAdminEmail(email));
+      setIsAdmin(isAdminEmail(email) || isDynamicAdmin);
       if (!musicPlayedRef.current) {
         musicPlayedRef.current = true;
         try { introRef.current.volume = 0.5; introRef.current.play().catch(() => {}); } catch { /* autoplay blocked */ }
@@ -202,6 +206,9 @@ function App() {
     const uid = (i) => i === 0 ? 'preview-me' : `preview-${i}`;
     setPowerScores({ [currentWeek]: Object.fromEntries(names.map((_, i) => [uid(i), 22 - i * 2])) });
     setWeekScores({ 101: Object.fromEntries(names.map((_, i) => [uid(i), 12 - i])), 102: Object.fromEntries(names.map((_, i) => [uid(i), 11 - i])) });
+    setGuestList(['albert@example.com', 'ozzy@example.com', 'art@example.com', 'roman@example.com']);
+    setNicknames({ 'albert@example_com': 'Albert', 'ozzy@example_com': 'Ozzy', 'art@example_com': 'Art', 'roman@example_com': 'Roman' });
+    setAdminEmails(['albert@example.com']);
   }, [games, currentWeek]);
 
   // --- 4. Phones (admin-only doc, with one-time migration from config/settings) ---
@@ -708,6 +715,24 @@ function App() {
   };
 
   // --- ADMIN ACTIONS ---
+  const isPlayerAdmin = (email) => !!email && (isAdminEmail(email) || adminEmails.some(e => e.toLowerCase() === email.toLowerCase()));
+  const toggleAdminRole = async (email) => {
+    if (isAdminEmail(email)) return; // founders are managed in code + rules
+    const has = adminEmails.some(e => e.toLowerCase() === email.toLowerCase());
+    const msg = has
+      ? `Remove admin access from ${email}?`
+      : `Make ${email} an admin? They'll be able to manage payments, picks, winners, and members.`;
+    if (!window.confirm(msg)) return;
+    try {
+      await updateDoc(doc(db, "config", "settings"), { adminEmails: has ? arrayRemove(email) : arrayUnion(email) });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const resetSurvivorPick = async (userId) => {
+    if (!window.confirm(`Clear this player's Week ${currentWeek} survivor pick?`)) return;
+    try {
+      await updateDoc(doc(db, PICKS_COLLECTION, userId), { [`survivor_week${currentWeek}`]: deleteField() });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
   const toggleSurvivorPaid = async (userId, currentStatus) => {
      try {
        await updateDoc(doc(db, PICKS_COLLECTION, userId), { survivor_paid: !currentStatus });
@@ -1231,15 +1256,60 @@ function App() {
             {/* === ADMIN === */}
             {view === 'admin' && isAdmin && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                 <div className="glass" style={{ padding: '20px', textAlign: 'center' }}>
-                    <h3 style={{ marginTop: 0 }}>📊 Weekly Stats</h3>
-                    <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: '10px', fontSize: '14px' }}>
-                        <div>📝 Submitted: <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{getWeekEntrants().length} / {leaders.length}</span></div>
-                        <div>💰 Paid: <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{leaders.filter(l => l[`paid_week${currentWeek}`] === true).length} / {leaders.length}</span></div>
-                        <div>🏆 Pot: <span style={{ color: 'var(--gold)', fontWeight: 800 }}>${getCurrentPot()}</span></div>
-                    </div>
-                 </div>
+                {/* Admin sub-tabs */}
+                <div className="tabs" style={{ margin: 0 }}>
+                  {[['overview', '📊 Overview'], ['weekly', '🏈 Weekly Picks'], ['survivor', '🛡️ Survivor'], ['players', '👥 Players']].map(([key, label]) => (
+                    <button key={key} className={`tab ${adminTab === key ? 'active' : ''}`} style={{ fontSize: '12px', padding: '7px 16px' }} onClick={() => setAdminTab(key)}>{label}</button>
+                  ))}
+                </div>
 
+                {/* --- OVERVIEW: the at-a-glance admin dashboard --- */}
+                {adminTab === 'overview' && (() => {
+                  const entrants = getWeekEntrants();
+                  const missing = leaders.filter(l => !l[`week${currentWeek}`] || Object.keys(l[`week${currentWeek}`]).length === 0);
+                  const unpaid = entrants.filter(l => l[`paid_week${currentWeek}`] !== true);
+                  const pool = getSurvivorPlayers();
+                  const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
+                  const survUnpaid = pool.filter(p => p.survivor_paid !== true);
+                  const nameList = (arr) => arr.length ? arr.map(getDisplayName).join(', ') : 'None 🎉';
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                        <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
+                          <div className="section-label" style={{ margin: 0 }}>Week {currentWeek} Pot</div>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--accent)' }}>${getCurrentPot()}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{entrants.length}/{leaders.length} submitted · {entrants.length - unpaid.length}/{entrants.length} paid</div>
+                        </div>
+                        <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
+                          <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>🛡️ Survivor Pot</div>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--gold)' }}>${pool.length * SURVIVOR_FEE}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{pool.length} entered · {aliveCount} alive · {survUnpaid.length} unpaid</div>
+                        </div>
+                        <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
+                          <div className="section-label" style={{ margin: 0 }}>Week Status</div>
+                          <div style={{ fontSize: '13px', marginTop: '8px', lineHeight: 1.9 }}>
+                            <div>{picksVisible ? '👁️ All picks revealed' : '🔒 Auto-reveal at kickoff'}</div>
+                            <div>{declaredWinner ? `🏆 Winner: ${getDisplayName(declaredWinner)}` : '⏳ No winner yet'}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="glass" style={{ padding: '18px 22px' }}>
+                        <h3 style={{ marginTop: 0, fontSize: '15px', color: 'var(--muted)' }}>🚨 Needs Attention · Week {currentWeek}</h3>
+                        <div style={{ fontSize: '13px', lineHeight: 2 }}>
+                          <div>⏳ <b>Missing picks:</b> {nameList(missing)}</div>
+                          <div>💸 <b>Submitted but unpaid:</b> {nameList(unpaid)}</div>
+                          <div>🛡️ <b>Survivor unpaid:</b> {nameList(survUnpaid)}</div>
+                        </div>
+                      </div>
+                      {declaredWinner && !databaseWinners[currentWeek] && (
+                        <button className="btn btn-gold" style={{ padding: '14px' }} onClick={finalizeWeekWinner}>🏆 Finalize Week {currentWeek} Winner: {getDisplayName(declaredWinner)}</button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* --- WEEKLY PICK CONTROLS --- */}
+                {adminTab === 'weekly' && (<>
                  <div className="glass" style={{ padding: '20px', textAlign: 'center' }}>
                    <h3 style={{ marginTop: 0 }}>⚙️ Game Control</h3>
                    <button className={picksVisible ? 'btn btn-danger' : 'btn btn-green'} onClick={togglePicksVisibility} style={{ fontSize: '15px', padding: '13px 26px' }}>
@@ -1260,7 +1330,7 @@ function App() {
                       <button className="btn btn-green" onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0}>Mark Selected as Paid</button>
                   </div>
                   <table className="matrix-table">
-                    <thead><tr><th className="matrix-sticky">Player</th><th style={{ color: 'var(--gold)' }}>🛡️SURV</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
+                    <thead><tr><th className="matrix-sticky">Player</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
                     <tbody>
                       {leaders.map(player => (
                         <tr key={player.userId}>
@@ -1269,11 +1339,6 @@ function App() {
                               <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} />
                               {getDisplayName(player)}
                             </label>
-                          </td>
-                          <td>
-                            {player.survivor_optIn === true
-                              ? <button onClick={() => toggleSurvivorPaid(player.userId, player.survivor_paid === true)} className="cell-chip" style={{ cursor: 'pointer', border: 'none', background: player.survivor_paid === true ? 'var(--gold-dim)' : 'rgba(255,255,255,0.05)', color: player.survivor_paid === true ? 'var(--gold)' : 'var(--muted)' }}>{player.survivor_paid === true ? '$' : '–'}</button>
-                              : <span style={{ color: 'var(--muted)' }}>·</span>}
                           </td>
                           {[...Array(18)].map((_, i) => i + 1).map(w => {
                             const isPaid = player[`paid_week${w}`] === true;
@@ -1302,7 +1367,43 @@ function App() {
                     <button className="btn btn-danger" style={{ width: '100%', padding: '12px', marginTop: '10px' }} onClick={() => resetPicks(adminTargetUser.userId)}>Reset Week {currentWeek} Picks for {getDisplayName(adminTargetUser)}</button>
                   </>}
                 </div>
+                </>)}
 
+                {/* --- SURVIVOR CONTROLS --- */}
+                {adminTab === 'survivor' && (() => {
+                  const pool = getSurvivorPlayers();
+                  return (
+                    <div className="glass" style={{ overflow: 'hidden' }}>
+                      <div className="row" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        <span className="section-label" style={{ margin: 0 }}>🛡️ Survivor Management · ${pool.length * SURVIVOR_FEE} pot</span>
+                        <span className="section-label" style={{ margin: 0 }}>Paid / Pick</span>
+                      </div>
+                      {pool.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)' }}>No survivor entries yet.</div>}
+                      {pool.map(p => {
+                        const st = getSurvivorState(p);
+                        return (
+                          <div key={p.userId} className="row">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <Avatar src={p.photo} name={getDisplayName(p)} />
+                              <div>
+                                <div style={{ fontWeight: 700 }}>{getDisplayName(p)} <span className={`pill ${st.alive ? 'pill-green' : 'pill-red'}`} style={{ marginLeft: '6px' }}>{st.alive ? 'ALIVE' : `OUT W${st.eliminatedWeek}`}</span></div>
+                                {st.teamsUsed.length > 0 && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>Used: {st.teamsUsed.join(' · ')}</div>}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <button onClick={() => toggleSurvivorPaid(p.userId, p.survivor_paid === true)} className="btn" style={{ padding: '5px 12px', fontSize: '12px', color: p.survivor_paid === true ? 'var(--gold)' : 'var(--muted)' }}>{p.survivor_paid === true ? '💰 PAID' : '– UNPAID'}</button>
+                              <span style={{ fontWeight: 800, minWidth: '40px', textAlign: 'center' }}>{st.currentPick || '—'}</span>
+                              {st.currentPick && <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={() => resetSurvivorPick(p.userId)}>Reset</button>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* --- PLAYERS --- */}
+                {adminTab === 'players' && (<>
                 {/* Update Phone */}
                 <div className="glass" style={{ padding: '20px' }}>
                   <h3 style={{ marginTop: 0 }}>✏️ Update Member Phone</h3>
@@ -1333,13 +1434,25 @@ function App() {
                     <div key={email} className="row" style={{ padding: '12px 4px' }}>
                       <div>
                         <span>{email}</span>
+                        {isPlayerAdmin(email) && <span className="pill pill-gold" style={{ marginLeft: '8px' }}>👑 ADMIN</span>}
                         {nicknames[sanitizeEmail(email)] && <span style={{ marginLeft: '10px', color: 'var(--accent)' }}>({nicknames[sanitizeEmail(email)]})</span>}
                         {phoneNumbers[sanitizeEmail(email)] && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>📞 {phoneNumbers[sanitizeEmail(email)]}</div>}
                       </div>
-                      <button className="btn btn-danger" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => removeGuest(email)}>✕</button>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {!isAdminEmail(email) && (
+                          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '11px', color: 'var(--gold)', borderColor: 'rgba(255,201,77,0.35)' }} onClick={() => toggleAdminRole(email)}>
+                            {isPlayerAdmin(email) ? 'Remove Admin' : 'Make Admin'}
+                          </button>
+                        )}
+                        <button className="btn btn-danger" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => removeGuest(email)}>✕</button>
+                      </div>
                     </div>
                   ))}
+                  <div style={{ marginTop: '14px', fontSize: '11px', color: 'var(--muted)' }}>
+                    👑 Founders (always admin): {ADMIN_EMAILS.join(' · ')}
+                  </div>
                 </div>
+                </>)}
               </div>
             )}
           </main>

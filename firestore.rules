@@ -21,11 +21,20 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
 
-    function isAdmin() {
+    // Founders are hardcoded (can never be locked out); additional admins are
+    // managed in-app via config/settings.adminEmails.
+    function isFounder() {
       return isSignedIn() && userEmail() in [
         'slayer91790@gmail.com',
         'antoniodanielvazquez@gmail.com'
       ];
+    }
+
+    function isAdmin() {
+      return isFounder() || (
+        isSignedIn() &&
+        userEmail() in get(/databases/$(database)/documents/config/settings).data.get('adminEmails', [])
+      );
     }
 
     function isMember() {
