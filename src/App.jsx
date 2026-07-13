@@ -23,6 +23,8 @@ const PREVIEW = import.meta.env.DEV && typeof window !== 'undefined' && new URLS
 // Add ?intro to any URL to replay the first-visit intro (video + welcome page)
 const FORCE_INTRO = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('intro');
 const INTRO_SEEN_KEY = `pep_intro_seen_${SEASON}`;
+// Until the season goes live, the intro plays on EVERY visit; after this date, once per device.
+const INTRO_EVERY_VISIT_UNTIL = new Date('2026-09-09T00:00:00');
 
 // --- 2025 ARCHIVE (frozen history; ignored for other seasons) ---
 const LEGACY_WEEKLY_WINNERS = SEASON === 2025 ? [
@@ -185,7 +187,8 @@ function App() {
     if (!allowed) return;
     let seen = false;
     try { seen = !!localStorage.getItem(INTRO_SEEN_KEY); } catch { /* storage unavailable */ }
-    if (FORCE_INTRO || !seen) {
+    const preseason = new Date() < INTRO_EVERY_VISIT_UNTIL;
+    if (FORCE_INTRO || preseason || !seen) {
       musicPlayedRef.current = true; // the video IS the intro — don't stack intro.mp3 on top
       setIntroStage('video');
     }
