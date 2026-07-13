@@ -2,9 +2,8 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-// ===============================================================
-// 🔑 YOUR SPECIFIC KEYS (HARDCODED FROM SAVED INFO)
-// ===============================================================
+// Firebase web config is public by design (it ships in the JS bundle).
+// Actual access control lives in firestore.rules — deploy those!
 const firebaseConfig = {
   apiKey: "AIzaSyBBGnrgsHTTTmuCbkZeZZ7FPlkuRP3JGfI",
   authDomain: "nfl-pick-em-2025.firebaseapp.com",

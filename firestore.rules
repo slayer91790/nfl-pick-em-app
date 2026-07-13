@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// Security model:
+//  - Only signed-in Google users whose email is on the allowlist (config/settings.allowedEmails)
+//    or in the admin list can read league data.
+//  - Players can only write their OWN picks doc, and can never touch paid_week* fields.
+//  - Admins (hardcoded emails below — keep in sync with ADMIN_EMAILS in src/App.jsx)
+//    can write everything, including config and payment flags.
+//  - Phone numbers live in config/private, readable by admins only.
+//
+// Deploy with: firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userEmail() in [
+        'slayer91790@gmail.com',
+        'antoniodanielvazquez@gmail.com'
+      ];
+    }
+
+    function isMember() {
+      return isSignedIn() && (
+        isAdmin() ||
+        userEmail() in get(/databases/$(database)/documents/config/settings).data.allowedEmails
+      );
+    }
+
+    // Payment flags are admin-only; enumerated because rules can't wildcard key names.
+    function paidFields() {
+      return ['paid_week1', 'paid_week2', 'paid_week3', 'paid_week4', 'paid_week5',
+              'paid_week6', 'paid_week7', 'paid_week8', 'paid_week9', 'paid_week10',
+              'paid_week11', 'paid_week12', 'paid_week13', 'paid_week14', 'paid_week15',
+              'paid_week16', 'paid_week17', 'paid_week18'];
+    }
+
+    // League settings: allowlist, nicknames, declared winners, picksVisible.
+    match /config/settings {
+      allow read: if isSignedIn(); // needed to check the allowlist right after login
+      allow write: if isAdmin();
+    }
+
+    // Phone numbers — admins only.
+    match /config/private {
+      allow read, write: if isAdmin();
+    }
+
+    // One doc per player per season (picks_2025, picks_2026, ...).
+    match /{picksCollection}/{userId} {
+      allow read: if picksCollection.matches('picks_20[0-9][0-9]') && isMember();
+
+      allow create: if picksCollection.matches('picks_20[0-9][0-9]') && (
+        isAdmin() ||
+        (isMember() && request.auth.uid == userId &&
+         !request.resource.data.keys().hasAny(paidFields()))
+      );
+
+      allow update: if picksCollection.matches('picks_20[0-9][0-9]') && (
+        isAdmin() ||
+        (isMember() && request.auth.uid == userId &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(paidFields()))
+      );
+
+      allow delete: if picksCollection.matches('picks_20[0-9][0-9]') && isAdmin();
+    }
+
+    // Everything else: denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
