@@ -34,7 +34,7 @@ const OLD_WEEKS = SEASON === 2025 ? {
 } : {};
 
 // 🔊 SOUNDS
-const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3', '/fart.mp3'];
+const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3', '/fart.mp3', '/baddecision.mp3', '/hailmary.mp3'];
 
 const isAdminEmail = (email) => !!email && ADMIN_EMAILS.some(e => e.toLowerCase() === email.toLowerCase());
 const sanitizeEmail = (email) => email ? email.replace(/\./g, '_') : "";
@@ -108,6 +108,7 @@ function App() {
 
   // 🔊 Audio Logic (Shuffle Bag)
   const introRef = useRef(new Audio('/intro.mp3'));
+  const selectSoundRef = useRef(new Audio('/teamselect.mp3')); // plays on regular pick clicks
   const funnySounds = useMemo(() => FUNNY_SOUND_FILES.map(file => new Audio(file)), []);
   const soundQueueRef = useRef([]);
   const musicPlayedRef = useRef(false);
@@ -591,6 +592,7 @@ function App() {
     const setPicksFunc = setTargetPicksState || setPicks;
     setPicksFunc((prev) => ({ ...prev, [game.id]: teamAbbr }));
 
+    let playedUnderdogSound = false;
     const oddsString = game.oddsString || "";
     if (oddsString && (oddsString.includes('+') || oddsString.includes('-'))) {
       const match = oddsString.match(/([A-Z]{2,3})\s*([+-]?)(\d+\.?\d*)/);
@@ -603,6 +605,7 @@ function App() {
             if (sign === '+' && teamAbbr === teamInOdds) isUnderdogPick = true;
 
             if (isUnderdogPick) {
+                playedUnderdogSound = true;
                 // 💀 Skull pop synced with the funny sound
                 setSkullPop({ gameId: game.id, side: teamAbbr });
                 clearTimeout(skullTimerRef.current);
@@ -626,6 +629,16 @@ function App() {
             }
         }
       }
+    }
+
+    // 🎧 Regular pick click — skipped when the underdog clip already fired
+    if (!playedUnderdogSound) {
+      try {
+        const s = selectSoundRef.current;
+        s.currentTime = 0;
+        s.volume = 0.6;
+        s.play().catch(() => {});
+      } catch { /* audio not ready */ }
     }
   };
 
