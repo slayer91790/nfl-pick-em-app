@@ -358,6 +358,19 @@ button { font-family: var(--font-body); }
 .pt-badge.pt2 { background: rgba(79, 140, 255, 0.16); color: var(--blue); }
 .pt-badge.pt3 { background: var(--gold-dim); color: var(--gold); }
 
+/* Per-team betting line on pick tiles */
+.odds-tag {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-body);
+  padding: 1px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted);
+}
+.odds-tag.dog { background: var(--gold-dim); color: var(--gold); }
+
 .tb-card { grid-column: 1 / -1; text-align: center; padding: 22px; }
 .tb-input {
   font-family: var(--font-display);

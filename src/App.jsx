@@ -429,6 +429,14 @@ function App() {
     return { xp, level: Math.floor(xp / 500) + 1, progress: (xp % 500) / 500 };
   };
 
+  // Each team's own line from the game odds, e.g. "LAC -11.5" → LAC "-11.5", ARI "+11.5"
+  const getTeamSpread = (game, abbr) => {
+    const match = (game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/);
+    if (!match) return null;
+    const [, fav, num] = match;
+    return abbr === fav ? `-${num}` : `+${num}`;
+  };
+
   // ⚡ POWER POINTS (experimental 2026): same picks, odds-weighted scoring.
   // Win with a favorite = 1 pt · underdog by less than 7 = 2 pts · 7+ point underdog = 3 pts.
   const getPickPointValue = (game, pick) => {
@@ -599,7 +607,7 @@ function App() {
       if (match) {
         const [, teamInOdds, sign, num] = match;
         const magnitude = parseFloat(num);
-        if (magnitude >= 8) {
+        if (magnitude >= 7) { // same threshold as the ⚡3 Power Points tier
             let isUnderdogPick = false;
             if (sign === '-' && teamAbbr !== teamInOdds) isUnderdogPick = true;
             if (sign === '+' && teamAbbr === teamInOdds) isUnderdogPick = true;
@@ -809,6 +817,7 @@ function App() {
           const tile = (side) => {
             const abbr = side.team.abbreviation;
             const ptVal = getPickPointValue(game, abbr);
+            const spread = getTeamSpread(game, abbr);
             return (
               <div
                 className={`team-tile ${myPick === abbr ? 'selected' : ''} ${locked ? 'noclick' : ''}`}
@@ -816,7 +825,10 @@ function App() {
               >
                 {side.team.logo ? <img src={side.team.logo} alt={abbr} /> : <div className="team-logo-fallback">🏈</div>}
                 <div>{abbr}</div>
-                {odds && <span className={`pt-badge ${ptVal === 3 ? 'pt3' : ptVal === 2 ? 'pt2' : ''}`}>⚡{ptVal}</span>}
+                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                  {spread && <span className={`odds-tag ${spread.startsWith('+') ? 'dog' : ''}`}>{spread}</span>}
+                  {odds && <span className={`pt-badge ${ptVal === 3 ? 'pt3' : ptVal === 2 ? 'pt2' : ''}`}>⚡{ptVal}</span>}
+                </div>
                 {skullPop && skullPop.gameId === game.id && skullPop.side === abbr && <span className="skull-pop">💀</span>}
               </div>
             );
@@ -1129,11 +1141,12 @@ function App() {
                             const used = usedBefore.includes(abbr);
                             const isSel = myState.currentPick === abbr;
                             const clickable = canPick && !locked && !used;
+                            const spread = getTeamSpread(game, abbr);
                             return (
                               <div className={`team-tile ${isSel ? 'selected-gold' : ''} ${used ? 'used' : ''} ${clickable ? '' : 'noclick'}`} onClick={clickable ? () => pickSurvivorTeam(game, abbr) : undefined}>
                                 {side.team.logo ? <img src={side.team.logo} alt={abbr} /> : <div className="team-logo-fallback">🏈</div>}
                                 <div>{abbr}</div>
-                                {used && <span className="pt-badge">USED</span>}
+                                {used ? <span className="pt-badge">USED</span> : (spread && <span className={`odds-tag ${spread.startsWith('+') ? 'dog' : ''}`}>{spread}</span>)}
                               </div>
                             );
                           };
