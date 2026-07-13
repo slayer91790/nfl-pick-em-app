@@ -484,6 +484,64 @@ button { font-family: var(--font-body); }
 .ticker-track { white-space: nowrap; animation: ticker 40s linear infinite; padding-left: 100%; font-size: 13px; color: #c9d2e3; }
 .ticker-track span { margin-right: 48px; }
 
+/* 🔥 Pick streak badge */
+.streak-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #ff9d4d;
+  background: rgba(255, 130, 60, 0.14);
+  border: 1px solid rgba(255, 130, 60, 0.4);
+  animation: streakPulse 1.6s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+/* 🎉 Confetti burst (hand-rolled, no dependencies) */
+.confetti-burst {
+  position: absolute;
+  left: 64px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.confetti-burst i {
+  position: absolute;
+  width: 7px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confettiFly 1.25s ease-out forwards;
+}
+
+/* 😖 Wrong-pick row shake */
+.fx-shake { animation: rowShake 0.5s ease-in-out; }
+
+/* 🆙 XP progress bar */
+.xp-bar {
+  width: 130px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.xp-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4f8cff, #00e589);
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 🏁 Standings rows animate position swaps (FLIP transform set from JS) */
+.standing-row { will-change: transform; }
+
 /* 💀 Underdog skull pop (synced with the funny-sound trigger) */
 .skull-pop {
   position: absolute;
@@ -499,6 +557,21 @@ button { font-family: var(--font-body); }
 
 /* ---------- Animations ---------- */
 @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+@keyframes streakPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 130, 60, 0); }
+  50% { box-shadow: 0 0 14px rgba(255, 130, 60, 0.35); }
+}
+@keyframes confettiFly {
+  0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--dx), calc(var(--dy) + 46px)) rotate(540deg); opacity: 0; }
+}
+@keyframes rowShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
 @keyframes skullPop {
   0%   { transform: translate(-50%, 0) scale(0.3) rotate(0deg); opacity: 0; }
   15%  { transform: translate(-50%, -10px) scale(1.3) rotate(-14deg); opacity: 1; }

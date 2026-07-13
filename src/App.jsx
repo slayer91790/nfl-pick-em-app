@@ -43,6 +43,23 @@ const Avatar = ({ src, name, size = 38 }) => src
   ? <img src={src} alt="" referrerPolicy="no-referrer" className="avatar" style={{ width: size, height: size }} />
   : <div className="avatar-fallback" style={{ width: size, height: size }}>{(name || '?').split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</div>;
 
+// 🎉 Hand-rolled confetti burst: 14 CSS particles fanned out via custom properties
+const CONFETTI_COLORS = ['#00e589', '#ffc94d', '#4f8cff', '#ff5c6c', '#ffffff'];
+const ConfettiBurst = () => (
+  <span className="confetti-burst" aria-hidden="true">
+    {Array.from({ length: 14 }, (_, i) => {
+      const angle = (i / 14) * 2 * Math.PI;
+      const dist = 42 + (i % 3) * 24;
+      return <i key={i} style={{
+        '--dx': `${Math.round(Math.cos(angle) * dist)}px`,
+        '--dy': `${Math.round(Math.sin(angle) * dist - 34)}px`,
+        background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+        animationDelay: `${(i % 4) * 45}ms`
+      }} />;
+    })}
+  </span>
+);
+
 function App() {
   const [user, setUser] = useState(null);
   const [allowed, setAllowed] = useState(false);
@@ -79,6 +96,12 @@ function App() {
 
   const [skullPop, setSkullPop] = useState(null); // 💀 { gameId, side } — synced to the underdog sound
   const skullTimerRef = useRef(null);
+  const [rowFx, setRowFx] = useState({});         // 🎉 { userId: 'confetti' | 'shake' } when a game goes final
+  const prevWinnersRef = useRef({});              // last-seen winner per game id, to spot newly-final games
+  const rowFxTimerRef = useRef(null);
+  const [weekScores, setWeekScores] = useState({}); // config: finalized correct-counts per week (feeds XP)
+  const standingRowRefs = useRef(new Map());      // 🏁 FLIP rank-swap animation on the standings
+  const prevRowTopsRef = useRef(new Map());
 
   const legacyPhonesRef = useRef(null); // phones found in config/settings (pre-migration)
   const fetchedWeeksRef = useRef(new Set()); // past weeks already fetched for Survivor results
@@ -123,6 +146,7 @@ function App() {
       setDatabaseWinners(data.winners || {});
       setPicksVisible(data.picksVisible || false);
       setPowerScores(data.powerScores || {});
+      setWeekScores(data.weekScores || {});
       if (data.phones) legacyPhonesRef.current = data.phones;
 
       const email = user.email.toLowerCase();
@@ -173,7 +197,9 @@ function App() {
         [`survivor_week${currentWeek}`]: idx < 6 ? weekPicks[firstGame.id] : undefined
       };
     }));
-    setPowerScores({ [currentWeek]: Object.fromEntries(names.map((_, i) => [i === 0 ? 'preview-me' : `preview-${i}`, 22 - i * 2])) });
+    const uid = (i) => i === 0 ? 'preview-me' : `preview-${i}`;
+    setPowerScores({ [currentWeek]: Object.fromEntries(names.map((_, i) => [uid(i), 22 - i * 2])) });
+    setWeekScores({ 101: Object.fromEntries(names.map((_, i) => [uid(i), 12 - i])), 102: Object.fromEntries(names.map((_, i) => [uid(i), 11 - i])) });
   }, [games, currentWeek]);
 
   // --- 4. Phones (admin-only doc, with one-time migration from config/settings) ---
@@ -239,7 +265,52 @@ function App() {
     setHasSubmitted(false);
     setPicks({});
     setTiebreaker("");
+    prevWinnersRef.current = {}; // don't fire confetti/shake across week switches
+    setRowFx({});
   }, [currentWeek]);
+
+  // --- 6b. 🎉 Confetti / 😖 shake when a game flips to final (from the live ESPN poll) ---
+  useEffect(() => {
+    if (!games.length) return;
+    const prev = prevWinnersRef.current;
+    const hadBaseline = Object.keys(prev).length > 0;
+    const newlyFinal = games.filter(g => g.winner && prev[g.id] === null);
+    prevWinnersRef.current = Object.fromEntries(games.map(g => [g.id, g.winner || null]));
+    if (!hadBaseline || !newlyFinal.length) return;
+    const fx = {};
+    newlyFinal.forEach(g => {
+      leaders.forEach(p => {
+        const pick = (p[`week${currentWeek}`] || {})[g.id];
+        if (!pick) return;
+        if (pick === g.winner) fx[p.userId] = 'confetti';           // a win always celebrates…
+        else if (fx[p.userId] !== 'confetti') fx[p.userId] = 'shake'; // …and outranks a same-tick loss
+      });
+    });
+    if (Object.keys(fx).length) {
+      setRowFx(fx);
+      clearTimeout(rowFxTimerRef.current);
+      rowFxTimerRef.current = setTimeout(() => setRowFx({}), 1600);
+    }
+  }, [games, leaders, currentWeek]);
+
+  // --- 6c. 🏁 FLIP rank-swap animation: rows glide to new standings positions ---
+  useEffect(() => {
+    const prevTops = prevRowTopsRef.current;
+    standingRowRefs.current.forEach((el, uid) => {
+      if (!el || !el.isConnected) return;
+      const top = el.getBoundingClientRect().top;
+      const oldTop = prevTops.get(uid);
+      if (oldTop !== undefined && Math.abs(oldTop - top) > 4) {
+        el.style.transition = 'none';
+        el.style.transform = `translateY(${oldTop - top}px)`;
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)';
+          el.style.transform = 'translateY(0)';
+        });
+      }
+      prevTops.set(uid, top);
+    });
+  }); // intentionally no deps: re-measure after every render
 
   // --- 7. Hydrate my submitted picks from the live data ---
   useEffect(() => {
@@ -327,6 +398,33 @@ function App() {
         }
     });
     return score;
+  };
+
+  // 🔥 Current streak: consecutive correct picks in kickoff order, counting back
+  // from the most recent finished game (unfinished games don't break the run).
+  const getCurrentStreak = (player) => {
+    const weekPicks = player[`week${currentWeek}`] || {};
+    const ordered = [...games].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+    let streak = 0;
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const g = ordered[i];
+      if (!g.winner) continue;
+      if (weekPicks[g.id] === g.winner) streak++;
+      else break;
+    }
+    return streak;
+  };
+
+  // 🆙 XP: 100 per correct pick across the season (finalized weeks + live current week).
+  // Every 500 XP = 1 level.
+  const getXpInfo = (player) => {
+    let correct = 0;
+    Object.entries(weekScores).forEach(([w, map]) => {
+      if (Number(w) !== currentWeek) correct += (map && map[player.userId]) || 0;
+    });
+    correct += getCorrectCountForPlayer(player);
+    const xp = correct * 100;
+    return { xp, level: Math.floor(xp / 500) + 1, progress: (xp % 500) / 500 };
   };
 
   // ⚡ POWER POINTS (experimental 2026): same picks, odds-weighted scoring.
@@ -635,7 +733,9 @@ function App() {
       await updateDoc(doc(db, "config", "settings"), {
         [`winners.${currentWeek}`]: name,
         // snapshot this week's ⚡ Power Points so season standings survive ESPN odds disappearing
-        [`powerScores.${currentWeek}`]: Object.fromEntries(leaders.map(p => [p.userId, getPowerPointsForPlayer(p)]))
+        [`powerScores.${currentWeek}`]: Object.fromEntries(leaders.map(p => [p.userId, getPowerPointsForPlayer(p)])),
+        // snapshot correct counts too — feeds the season 🆙 XP / level system
+        [`weekScores.${currentWeek}`]: Object.fromEntries(leaders.map(p => [p.userId, getCorrectCountForPlayer(p)]))
       });
       alert("✅ Winner Saved!");
   };
@@ -815,11 +915,17 @@ function App() {
                   {leaders.map((player) => {
                     const weekPicks = player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0;
                     const isPaid = player[`paid_week${currentWeek}`] === true;
+                    const streak = getCurrentStreak(player);
+                    const fx = rowFx[player.userId];
                     return (
-                      <div key={player.userId} className="row">
+                      <div key={player.userId} className={`row ${fx === 'shake' ? 'fx-shake' : ''}`} style={{ position: 'relative' }}>
+                        {fx === 'confetti' && <ConfettiBurst />}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                           <Avatar src={player.photo} name={getDisplayName(player)} />
-                          <div style={{ fontWeight: 700 }}>{getDisplayName(player)}</div>
+                          <div style={{ fontWeight: 700 }}>
+                            {getDisplayName(player)}
+                            {streak >= 2 && <span className="streak-badge" style={{ marginLeft: '8px' }}>🔥 {streak} in a row</span>}
+                          </div>
                         </div>
                         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                           <span className={`pill ${isPaid ? 'pill-green' : 'pill-red'}`}>{isPaid ? 'PAID' : 'UNPAID'}</span>
@@ -932,15 +1038,25 @@ function App() {
                   </div>
                   {getSeasonPowerStandings().length === 0
                     ? <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Standings appear after the first week is finalized.</div>
-                    : getSeasonPowerStandings().map((e, i) => (
-                      <div key={e.uid} className="row">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={{ color: 'var(--muted)', fontWeight: 700, width: '22px' }}>{i + 1}.</span>
-                          <span style={{ fontWeight: 700 }}>{getDisplayName(e.player)}</span>
+                    : getSeasonPowerStandings().map((e, i) => {
+                      const xpInfo = getXpInfo(e.player);
+                      return (
+                        <div key={e.uid} className="row standing-row" ref={el => { if (el) standingRowRefs.current.set(e.uid, el); else standingRowRefs.current.delete(e.uid); }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ color: 'var(--muted)', fontWeight: 700, width: '22px' }}>{i + 1}.</span>
+                            <div>
+                              <div style={{ fontWeight: 700 }}>
+                                {getDisplayName(e.player)}
+                                <span className="pill pill-gold" style={{ marginLeft: '8px' }}>LV {xpInfo.level}</span>
+                              </div>
+                              <div className="xp-bar"><div className="xp-fill" style={{ width: `${Math.round(xpInfo.progress * 100)}%` }} /></div>
+                              <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>{xpInfo.xp} XP · {500 - (xpInfo.xp % 500)} to LV {xpInfo.level + 1}</div>
+                            </div>
+                          </div>
+                          <span style={{ fontWeight: 800, color: 'var(--blue)' }}>⚡ {e.pts}</span>
                         </div>
-                        <span style={{ fontWeight: 800, color: 'var(--blue)' }}>⚡ {e.pts}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -1058,6 +1174,15 @@ function App() {
             {/* === PICKS === */}
             {view === 'picks' && (
               <div>
+                {(() => {
+                  const me = user ? leaders.find(l => l.userId === user.uid) : null;
+                  const streak = me ? getCurrentStreak(me) : 0;
+                  return streak >= 2 && (
+                    <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                      <span className="streak-badge" style={{ fontSize: '13px', padding: '6px 16px' }}>🔥 {streak} in a row — keep it rolling!</span>
+                    </div>
+                  );
+                })()}
                 {renderPicksGrid(picks, setPicks, tiebreaker, setTiebreaker, false)}
                 {(() => {
                   const remaining = getUnlockedGames().filter(g => !picks[g.id]).length;
