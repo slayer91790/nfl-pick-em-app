@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { signInWithGoogle, db, auth } from './firebase';
+import { signInWithGoogle, completeRedirectSignIn, db, auth } from './firebase';
 import { doc, setDoc, collection, updateDoc, deleteField, getDoc, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -120,6 +120,7 @@ function App() {
       setIsAdmin(true);
       return;
     }
+    completeRedirectSignIn(); // finish mobile redirect sign-in (no-op otherwise)
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) { setAllowed(false); setIsAdmin(false); }
