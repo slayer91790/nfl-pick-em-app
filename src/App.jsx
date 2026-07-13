@@ -11,6 +11,7 @@ const PICKS_COLLECTION = `picks_${SEASON}`;
 const ENTRY_FEE = 10;
 const DOUBLE_FEE_WEEK = 12; // Thanksgiving "Double Gobble" week ($20) — Nov 26, 2026 is NFL Week 12; re-check each season!
 const SURVIVOR_FEE = 20;    // 🛡️ Survivor Pool: optional, one-time entry for the whole season
+const SEASON_POT_FEE = 20;  // 👑 Season Champ: one-time, most correct picks across the season wins
 
 // Admins — keep in sync with the list in firestore.rules
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
@@ -200,6 +201,7 @@ function App() {
         [`paid_week${currentWeek}`]: idx % 3 !== 0,
         survivor_optIn: idx < 6,
         survivor_paid: idx < 6 && idx % 2 === 0,
+        season_paid: idx % 4 !== 1,
         [`survivor_week${currentWeek}`]: idx < 6 ? weekPicks[firstGame.id] : undefined
       };
     }));
@@ -424,15 +426,21 @@ function App() {
     return streak;
   };
 
-  // 🆙 XP: 100 per correct pick across the season (finalized weeks + live current week).
-  // Every 500 XP = 1 level.
-  const getXpInfo = (player) => {
+  // 👑 Season total: correct picks from finalized weeks + the live current week.
+  const getSeasonCorrectTotal = (player) => {
     let correct = 0;
     Object.entries(weekScores).forEach(([w, map]) => {
       if (Number(w) !== currentWeek) correct += (map && map[player.userId]) || 0;
     });
-    correct += getCorrectCountForPlayer(player);
-    const xp = correct * 100;
+    return correct + getCorrectCountForPlayer(player);
+  };
+  const getSeasonStandings = () => leaders
+    .map(p => ({ player: p, correct: getSeasonCorrectTotal(p) }))
+    .sort((a, b) => b.correct - a.correct);
+
+  // 🆙 XP: 100 per correct pick across the season. Every 500 XP = 1 level.
+  const getXpInfo = (player) => {
+    const xp = getSeasonCorrectTotal(player) * 100;
     return { xp, level: Math.floor(xp / 500) + 1, progress: (xp % 500) / 500 };
   };
 
@@ -732,6 +740,11 @@ function App() {
     try {
       await updateDoc(doc(db, PICKS_COLLECTION, userId), { [`survivor_week${currentWeek}`]: deleteField() });
     } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const toggleSeasonPaid = async (userId, currentStatus) => {
+     try {
+       await updateDoc(doc(db, PICKS_COLLECTION, userId), { season_paid: !currentStatus });
+     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
   const toggleSurvivorPaid = async (userId, currentStatus) => {
      try {
@@ -1083,6 +1096,28 @@ function App() {
                   ))}
                 </div>
 
+                {/* 👑 SEASON CHAMPIONSHIP (real-money season-long game) */}
+                <div className="glass" style={{ overflow: 'hidden', marginTop: '20px' }}>
+                  <div className="row" style={{ background: 'rgba(255,255,255,0.03)', justifyContent: 'center' }}>
+                    <span className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Championship · ${leaders.length * SEASON_POT_FEE} Pot</span>
+                  </div>
+                  <div style={{ padding: '10px 18px 0 18px', fontSize: '11px', color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
+                    Most correct picks across the whole season takes the pot — ${SEASON_POT_FEE} per player, every single week counts.
+                  </div>
+                  {leaders.length === 0
+                    ? <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Standings appear once picks start.</div>
+                    : getSeasonStandings().map((e, i) => (
+                      <div key={e.player.userId} className="row standing-row" ref={el => { const k = `szn-${e.player.userId}`; if (el) standingRowRefs.current.set(k, el); else standingRowRefs.current.delete(k); }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ color: 'var(--muted)', fontWeight: 700, width: '22px' }}>{i + 1}.</span>
+                          <span style={{ fontWeight: 700 }}>{i === 0 ? '👑 ' : ''}{getDisplayName(e.player)}</span>
+                          {e.player.season_paid !== true && <span className="pill pill-red">UNPAID</span>}
+                        </div>
+                        <span style={{ fontWeight: 800, color: 'var(--accent)' }}>{e.correct} correct</span>
+                      </div>
+                    ))}
+                </div>
+
                 {/* ⚡ POWER STANDINGS (experimental parallel game) */}
                 <div className="glass" style={{ overflow: 'hidden', marginTop: '20px' }}>
                   <div className="row" style={{ background: 'rgba(255,255,255,0.03)', justifyContent: 'center' }}>
@@ -1271,6 +1306,7 @@ function App() {
                   const pool = getSurvivorPlayers();
                   const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
                   const survUnpaid = pool.filter(p => p.survivor_paid !== true);
+                  const seasonUnpaid = leaders.filter(l => l.season_paid !== true);
                   const nameList = (arr) => arr.length ? arr.map(getDisplayName).join(', ') : 'None 🎉';
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -1286,6 +1322,11 @@ function App() {
                           <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{pool.length} entered · {aliveCount} alive · {survUnpaid.length} unpaid</div>
                         </div>
                         <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
+                          <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Pot</div>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--gold)' }}>${leaders.length * SEASON_POT_FEE}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{leaders.length} players · {leaders.length - seasonUnpaid.length} paid</div>
+                        </div>
+                        <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
                           <div className="section-label" style={{ margin: 0 }}>Week Status</div>
                           <div style={{ fontSize: '13px', marginTop: '8px', lineHeight: 1.9 }}>
                             <div>{picksVisible ? '👁️ All picks revealed' : '🔒 Auto-reveal at kickoff'}</div>
@@ -1299,6 +1340,7 @@ function App() {
                           <div>⏳ <b>Missing picks:</b> {nameList(missing)}</div>
                           <div>💸 <b>Submitted but unpaid:</b> {nameList(unpaid)}</div>
                           <div>🛡️ <b>Survivor unpaid:</b> {nameList(survUnpaid)}</div>
+                          <div>👑 <b>Season pot unpaid:</b> {nameList(seasonUnpaid)}</div>
                         </div>
                       </div>
                       {declaredWinner && !databaseWinners[currentWeek] && (
@@ -1330,7 +1372,7 @@ function App() {
                       <button className="btn btn-green" onClick={markSelectedPaid} disabled={selectedPaidUsers.length === 0}>Mark Selected as Paid</button>
                   </div>
                   <table className="matrix-table">
-                    <thead><tr><th className="matrix-sticky">Player</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
+                    <thead><tr><th className="matrix-sticky">Player</th><th style={{ color: 'var(--gold)' }}>👑SZN</th>{[...Array(18)].map((_, i) => i + 1).map(w => <th key={w}>W{w}</th>)}</tr></thead>
                     <tbody>
                       {leaders.map(player => (
                         <tr key={player.userId}>
@@ -1339,6 +1381,9 @@ function App() {
                               <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} />
                               {getDisplayName(player)}
                             </label>
+                          </td>
+                          <td>
+                            <button onClick={() => toggleSeasonPaid(player.userId, player.season_paid === true)} className="cell-chip" style={{ cursor: 'pointer', border: 'none', background: player.season_paid === true ? 'var(--gold-dim)' : 'rgba(255,255,255,0.05)', color: player.season_paid === true ? 'var(--gold)' : 'var(--muted)' }}>{player.season_paid === true ? '$' : '–'}</button>
                           </td>
                           {[...Array(18)].map((_, i) => i + 1).map(w => {
                             const isPaid = player[`paid_week${w}`] === true;
