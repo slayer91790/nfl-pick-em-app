@@ -20,6 +20,10 @@ const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"]
 // Run `npm run dev` and open http://localhost:5173/?preview  (stripped from prod builds)
 const PREVIEW = import.meta.env.DEV && typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('preview');
 
+// Add ?intro to any URL to replay the first-visit intro (video + welcome page)
+const FORCE_INTRO = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('intro');
+const INTRO_SEEN_KEY = `pep_intro_seen_${SEASON}`;
+
 // --- 2025 ARCHIVE (frozen history; ignored for other seasons) ---
 const LEGACY_WEEKLY_WINNERS = SEASON === 2025 ? [
   { week: 3, winner: "Omar" }, { week: 4, winner: "Luis" }, { week: 5, winner: "Albert" },
@@ -99,6 +103,9 @@ function App() {
 
   const [skullPop, setSkullPop] = useState(null); // 💀 { gameId, side } — synced to the underdog sound
   const skullTimerRef = useRef(null);
+  const [introStage, setIntroStage] = useState(null); // 🎬 null | 'video' | 'welcome' (first visit of the season)
+  const [introMuted, setIntroMuted] = useState(true);
+  const introVideoRef = useRef(null);
   const [rowFx, setRowFx] = useState({});         // 🎉 { userId: 'confetti' | 'shake' } when a game goes final
   const prevWinnersRef = useRef({});              // last-seen winner per game id, to spot newly-final games
   const rowFxTimerRef = useRef(null);
@@ -172,6 +179,22 @@ function App() {
     });
     return () => unsubscribe();
   }, [user]);
+
+  // --- 2b. 🎬 First visit of the season: intro clip → welcome page ---
+  useEffect(() => {
+    if (!allowed) return;
+    let seen = false;
+    try { seen = !!localStorage.getItem(INTRO_SEEN_KEY); } catch { /* storage unavailable */ }
+    if (FORCE_INTRO || !seen) {
+      musicPlayedRef.current = true; // the video IS the intro — don't stack intro.mp3 on top
+      setIntroStage('video');
+    }
+  }, [allowed]);
+
+  const dismissIntro = () => {
+    setIntroStage(null);
+    try { localStorage.setItem(INTRO_SEEN_KEY, '1'); } catch { /* storage unavailable */ }
+  };
 
   // --- 3. Picks collection (live — replaces polling + page reloads) ---
   useEffect(() => {
@@ -1502,6 +1525,46 @@ function App() {
             )}
           </main>
         </>
+      )}
+
+      {/* 🎬 FIRST-VISIT INTRO: video, then the season welcome page */}
+      {introStage === 'video' && (
+        <div className="intro-overlay">
+          <video
+            ref={introVideoRef}
+            src="/introclip.mp4"
+            autoPlay
+            muted={introMuted}
+            playsInline
+            className="intro-video"
+            onEnded={() => setIntroStage('welcome')}
+            onError={() => setIntroStage('welcome')}
+          />
+          <button className="btn btn-ghost intro-sound" onClick={() => setIntroMuted(m => !m)}>
+            {introMuted ? '🔇 Tap for sound' : '🔊 Sound on'}
+          </button>
+          <button className="btn btn-ghost intro-skip" onClick={() => setIntroStage('welcome')}>Skip ▸</button>
+        </div>
+      )}
+      {introStage === 'welcome' && (
+        <div className="intro-overlay" style={{ overflowY: 'auto' }}>
+          <div className="glass welcome-card">
+            <div style={{ fontSize: '52px' }}>🏈</div>
+            <h1 style={{ margin: '6px 0 2px 0', fontSize: '30px' }}>Welcome to the <span style={{ color: 'var(--accent)' }}>{SEASON} Season</span></h1>
+            <p style={{ margin: '0 0 18px 0', color: 'var(--muted)', fontSize: '13px' }}>Pick 'Em Pro · three pots, one champion</p>
+
+            <div className="welcome-game"><span className="wg-icon">🏈</span><div><b>Weekly Pick 'Em</b> — ${ENTRY_FEE}/week (${20} on Thanksgiving Week {DOUBLE_FEE_WEEK}). Most correct picks wins the weekly pot; MNF total score breaks ties.</div></div>
+            <div className="welcome-game"><span className="wg-icon">🛡️</span><div><b>Survivor Pool</b> — ${SURVIVOR_FEE} one-time, optional. Pick ONE team a week, never reuse a team, lose and you're out. Last one standing takes the pot.</div></div>
+            <div className="welcome-game"><span className="wg-icon">👑</span><div><b>Season Championship</b> — ${SEASON_POT_FEE} one-time. Most correct picks across all 18 weeks takes it all.</div></div>
+            <div className="welcome-game"><span className="wg-icon">⚡</span><div><b>Power Points</b> — free trial game. Favorites 1 pt, underdogs 2 pts, 7+ point dogs 3 pts. Bragging rights only… this year.</div></div>
+
+            <div style={{ textAlign: 'left', margin: '16px 0 20px 0', fontSize: '12px', color: 'var(--muted)', lineHeight: 1.8 }}>
+              <b style={{ color: 'var(--text)' }}>📜 House rules:</b> every game locks at its kickoff · picks reveal at kickoff · no changes after you submit · pay <a href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)' }}>@MrDoom on Venmo</a>
+            </div>
+
+            <button className="cta" style={{ fontSize: '17px', padding: '14px 44px' }} onClick={dismissIntro}>Let's Go</button>
+          </div>
+        </div>
       )}
 
       {/* 🟢 NEWS TICKER */}
