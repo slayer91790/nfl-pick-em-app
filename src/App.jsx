@@ -1083,6 +1083,11 @@ function App() {
                       <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--gold)' }}>${survPool.length * SURVIVOR_FEE}</div>
                       <div style={{ fontSize: '11px', color: 'var(--muted)' }}>last standing · {survPool.length} entered</div>
                     </div>
+                    <div className="glass" style={{ padding: '16px', textAlign: 'center', borderColor: 'rgba(0,229,137,0.35)' }}>
+                      <div className="section-label" style={{ margin: 0, color: 'var(--accent)' }}>💰 Total In Play</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)', textShadow: '0 0 25px var(--accent-glow)' }}>${confirmedPlayers.length * weeklySeasonTotal + confirmedPlayers.length * SEASON_POT_FEE + survPool.length * SURVIVOR_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>all 18 weekly pots + season + survivor</div>
+                    </div>
                   </div>
 
                   {/* 👥 Who's playing */}
