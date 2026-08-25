@@ -824,6 +824,14 @@ function App() {
     try { await updateDoc(doc(db, PICKS_COLLECTION, player.userId), { prepaid_weekly: player.prepaid_weekly !== true }); }
     catch (e) { console.error(e); alert("Error: " + e.message); }
   };
+  const toggleSurvivorPackage = async (player) => {
+    // Paying for survivor also joins them; unpaying leaves them in the game but owing
+    try {
+      await updateDoc(doc(db, PICKS_COLLECTION, player.userId), player.survivor_paid === true
+        ? { survivor_paid: false }
+        : { survivor_paid: true, survivor_optIn: true });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
   const toggleAllInPaid = async (player) => {
     const isAllIn = player.prepaid_weekly === true && player.season_paid === true && player.survivor_paid === true;
     try {
@@ -1748,12 +1756,22 @@ function App() {
                         </button>
                         {target && (
                           <button className={`btn ${target.prepaid_weekly === true ? 'btn-green' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => togglePrepaidWeekly(target)}>
-                            {target.prepaid_weekly === true ? '💵 Weekly Prepaid ✓' : `💵 Prepay Weekly ($${17 * ENTRY_FEE + 20})`}
+                            {target.prepaid_weekly === true ? '💵 Weekly ✓' : `💵 Weekly ($${17 * ENTRY_FEE + 20})`}
+                          </button>
+                        )}
+                        {target && (
+                          <button className={`btn ${target.season_paid === true ? 'btn-green' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => toggleSeasonPaid(target.userId, target.season_paid === true)}>
+                            {target.season_paid === true ? '👑 Season ✓' : `👑 Season ($${SEASON_POT_FEE})`}
+                          </button>
+                        )}
+                        {target && (
+                          <button className={`btn ${target.survivor_paid === true ? 'btn-green' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => toggleSurvivorPackage(target)}>
+                            {target.survivor_paid === true ? '🛡️ Survivor ✓' : `🛡️ Survivor ($${SURVIVOR_FEE})`}
                           </button>
                         )}
                         {target && (
                           <button className={`btn ${allIn ? 'btn-gold' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => toggleAllInPaid(target)}>
-                            {allIn ? '🎯 All-In Paid ✓' : `🎯 All-In Paid ($${17 * ENTRY_FEE + 20 + SEASON_POT_FEE + SURVIVOR_FEE})`}
+                            {allIn ? '🎯 All-In ✓' : `🎯 All-In ($${17 * ENTRY_FEE + 20 + SEASON_POT_FEE + SURVIVOR_FEE})`}
                           </button>
                         )}
                         {real && ph && (
