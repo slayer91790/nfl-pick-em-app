@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, db, auth } from './firebase';
-import { doc, setDoc, collection, updateDoc, deleteField, deleteDoc, getDoc, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, collection, updateDoc, deleteField, deleteDoc, getDoc, getDocs, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // --- SEASON CONFIGURATION ---
@@ -766,6 +766,41 @@ function App() {
       await updateDoc(doc(db, "config", "settings"), { adminEmails: has ? arrayRemove(email) : arrayUnion(email) });
     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
+  // 💾 Backups: full JSON snapshot of the season (picks, payments, config) + restore
+  const downloadBackup = async () => {
+    try {
+      const snap = await getDocs(collection(db, PICKS_COLLECTION));
+      const players = {};
+      snap.forEach(d => { players[d.id] = d.data(); });
+      const settings = (await getDoc(doc(db, "config", "settings"))).data() || {};
+      const priv = (await getDoc(doc(db, "config", "private"))).data() || {};
+      const backup = {
+        app: 'pickempro', season: SEASON, exportedAt: new Date().toISOString(),
+        collections: { [PICKS_COLLECTION]: players, 'config/settings': settings, 'config/private': priv }
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pickempro-backup-${SEASON}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { console.error(e); alert("Backup failed: " + e.message); }
+  };
+  const restoreBackup = async (file) => {
+    try {
+      const data = JSON.parse(await file.text());
+      const players = data.collections && data.collections[PICKS_COLLECTION];
+      if (data.app !== 'pickempro' || !players) { alert(`Not a valid ${PICKS_COLLECTION} backup file.`); return; }
+      if (!window.confirm(`Restore snapshot from ${data.exportedAt}?\n\nThis OVERWRITES all current picks, payments, and league settings with the backup's contents.`)) return;
+      const batch = writeBatch(db);
+      Object.entries(players).forEach(([id, d]) => batch.set(doc(db, PICKS_COLLECTION, id), d));
+      if (data.collections['config/settings']) batch.set(doc(db, "config", "settings"), data.collections['config/settings']);
+      if (data.collections['config/private']) batch.set(doc(db, "config", "private"), data.collections['config/private']);
+      await batch.commit();
+      alert("✅ Snapshot restored.");
+    } catch (e) { console.error(e); alert("Restore failed: " + e.message); }
+  };
+
   // Roster management: works even for members who haven't logged in yet (placeholder docs)
   const findRealPlayerByEmail = (email) => leaders.find(l => !String(l.userId).startsWith('guest_') && (l.email || '').toLowerCase() === email.toLowerCase());
   const findPlaceholderByEmail = (email) => leaders.find(l => l.userId === `guest_${sanitizeEmail(email.toLowerCase())}`);
@@ -1531,6 +1566,21 @@ function App() {
                       {declaredWinner && !databaseWinners[currentWeek] && (
                         <button className="btn btn-gold" style={{ padding: '14px' }} onClick={finalizeWeekWinner}>🏆 Finalize Week {currentWeek} Winner: {getDisplayName(declaredWinner)}</button>
                       )}
+
+                      {/* 💾 Backups */}
+                      <div className="glass" style={{ padding: '18px 22px' }}>
+                        <h3 style={{ marginTop: 0, fontSize: '15px', color: 'var(--muted)' }}>💾 Backups</h3>
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <button className="btn btn-green" onClick={downloadBackup}>⬇ Download Snapshot</button>
+                          <label className="btn btn-danger" style={{ cursor: 'pointer' }}>
+                            ⚠ Restore Snapshot…
+                            <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) restoreBackup(f); e.target.value = ''; }} />
+                          </label>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '10px', lineHeight: 1.6 }}>
+                          Snapshot = every player's picks, payments, and league settings as one JSON file. Download one after each week's finalize (and before any app update). Restore overwrites current data with the file's contents.
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
