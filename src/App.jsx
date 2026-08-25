@@ -405,7 +405,10 @@ function App() {
   // Paid for a given week either directly or via the season-long weekly prepay
   const isWeekPaid = (player, week) => player[`paid_week${week}`] === true || player.prepaid_weekly === true;
   const getWeekEntrants = () => leaders.filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0);
-  const getCurrentPot = () => getWeekEntrants().length * getWeeklyFee();
+  // In for the week = submitted picks OR already paid for it (prepay counts before kickoff)
+  const getWeekPlayers = () => leaders.filter(l =>
+    (l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0) || isWeekPaid(l, currentWeek));
+  const getCurrentPot = () => getWeekPlayers().length * getWeeklyFee();
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
 
   // A game locks at kickoff — no picking it after it starts.
@@ -1192,7 +1195,7 @@ function App() {
                 <div className="pot-card">
                   <div className="pot-label">Week {currentWeek} Pot</div>
                   <div className="pot-amount">${getCurrentPot()}</div>
-                  <div className="pot-sub">{getWeekEntrants().length} players in · ${getWeeklyFee()} entry{currentWeek === DOUBLE_FEE_WEEK ? ' · 🦃 Double Gobble Week' : ''}</div>
+                  <div className="pot-sub">{getWeekPlayers().length} players in · ${getWeeklyFee()} entry{currentWeek === DOUBLE_FEE_WEEK ? ' · 🦃 Double Gobble Week' : ''}</div>
                   <a className="btn btn-gold" style={{ textDecoration: 'none', display: 'inline-block' }} href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer">Pay ${getWeeklyFee()} on Venmo ↗</a>
                 </div>
 
@@ -1548,7 +1551,7 @@ function App() {
                         <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
                           <div className="section-label" style={{ margin: 0 }}>Week {currentWeek} Pot</div>
                           <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--accent)' }}>${getCurrentPot()}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{entrants.length}/{leaders.length} submitted · {entrants.length - unpaid.length}/{entrants.length} paid</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{entrants.length}/{getWeekPlayers().length} submitted · {leaders.filter(l => isWeekPaid(l, currentWeek)).length}/{getWeekPlayers().length} paid</div>
                         </div>
                         <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
                           <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>🛡️ Survivor Pot</div>
