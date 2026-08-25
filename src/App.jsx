@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, db, auth } from './firebase';
-import { doc, setDoc, collection, updateDoc, deleteField, getDoc, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, collection, updateDoc, deleteField, deleteDoc, getDoc, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // --- SEASON CONFIGURATION ---
@@ -223,7 +223,7 @@ function App() {
       const firstGame = games[idx % games.length];
       return {
         userId: idx === 0 ? 'preview-me' : `preview-${idx}`,
-        userName: n, photo: '',
+        userName: n, photo: '', email: `${n.split(' ')[0].toLowerCase()}@example.com`,
         [`week${currentWeek}`]: weekPicks,
         [`tiebreaker_week${currentWeek}`]: String(38 + idx * 3),
         [`paid_week${currentWeek}`]: idx % 3 !== 0,
@@ -402,6 +402,8 @@ function App() {
 
   // --- HELPERS ---
   const getWeeklyFee = () => (currentWeek === DOUBLE_FEE_WEEK ? 20 : ENTRY_FEE);
+  // Paid for a given week either directly or via the season-long weekly prepay
+  const isWeekPaid = (player, week) => player[`paid_week${week}`] === true || player.prepaid_weekly === true;
   const getWeekEntrants = () => leaders.filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0);
   const getCurrentPot = () => getWeekEntrants().length * getWeeklyFee();
   const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
@@ -634,15 +636,6 @@ function App() {
 
   // --- ACTIONS ---
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
-  const confirmSeason = async () => {
-    if (!user) return;
-    try {
-      await setDoc(doc(db, PICKS_COLLECTION, user.uid), {
-        userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
-        confirmed: true, confirmedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) { console.error(e); alert("Error: " + e.message); }
-  };
   const handleLogout = () => { auth.signOut(); setView('dashboard'); };
 
   const selectTeam = (game, teamAbbr, targetPicksState, setTargetPicksState, adminMode = false) => {
@@ -771,6 +764,48 @@ function App() {
     if (!window.confirm(msg)) return;
     try {
       await updateDoc(doc(db, "config", "settings"), { adminEmails: has ? arrayRemove(email) : arrayUnion(email) });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  // Roster management: works even for members who haven't logged in yet (placeholder docs)
+  const findRealPlayerByEmail = (email) => leaders.find(l => !String(l.userId).startsWith('guest_') && (l.email || '').toLowerCase() === email.toLowerCase());
+  const findPlaceholderByEmail = (email) => leaders.find(l => l.userId === `guest_${sanitizeEmail(email.toLowerCase())}`);
+  const toggleRosterConfirm = async (email) => {
+    const target = findRealPlayerByEmail(email) || findPlaceholderByEmail(email);
+    try {
+      if (target) {
+        await updateDoc(doc(db, PICKS_COLLECTION, target.userId), { confirmed: target.confirmed !== true });
+      } else {
+        const phId = `guest_${sanitizeEmail(email.toLowerCase())}`;
+        await setDoc(doc(db, PICKS_COLLECTION, phId), {
+          userId: phId, userName: nicknames[sanitizeEmail(email)] || email.split('@')[0], photo: '',
+          email: email.toLowerCase(), placeholderFor: email.toLowerCase(), confirmed: true
+        });
+      }
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const togglePrepaidWeekly = async (player) => {
+    try { await updateDoc(doc(db, PICKS_COLLECTION, player.userId), { prepaid_weekly: player.prepaid_weekly !== true }); }
+    catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const toggleAllInPaid = async (player) => {
+    const isAllIn = player.prepaid_weekly === true && player.season_paid === true && player.survivor_paid === true;
+    try {
+      await updateDoc(doc(db, PICKS_COLLECTION, player.userId), isAllIn
+        ? { prepaid_weekly: false, season_paid: false, survivor_paid: false }
+        : { prepaid_weekly: true, season_paid: true, survivor_paid: true, survivor_optIn: true });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
+  const mergePlaceholder = async (email) => {
+    const ph = findPlaceholderByEmail(email);
+    const real = findRealPlayerByEmail(email);
+    if (!ph || !real) return;
+    if (!window.confirm(`Move ${getDisplayName(real)}'s roster flags from the placeholder onto their real account and remove the placeholder?`)) return;
+    const flags = {};
+    ['confirmed', 'prepaid_weekly', 'season_paid', 'survivor_paid', 'survivor_optIn',
+     ...Array.from({ length: 18 }, (_, i) => `paid_week${i + 1}`)].forEach(k => { if (ph[k] !== undefined) flags[k] = ph[k]; });
+    try {
+      await updateDoc(doc(db, PICKS_COLLECTION, real.userId), flags);
+      await deleteDoc(doc(db, PICKS_COLLECTION, ph.userId));
     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
   const resetSurvivorPick = async (userId) => {
@@ -992,8 +1027,8 @@ function App() {
                     <div className="pot-amount" style={{ fontSize: '44px' }}>{days}d {hours}h {mins}m</div>
                     <div className="pot-sub">Wednesday, Sept 9 · picks lock at each game's kickoff</div>
                     {me?.confirmed === true
-                      ? <span className="pill pill-green" style={{ fontSize: '13px', padding: '8px 18px' }}>✅ YOU'RE IN — SEE YOU WEEK 1</span>
-                      : <button className="cta" style={{ fontSize: '16px', padding: '13px 36px' }} onClick={confirmSeason}>✅ I'm In for {SEASON}</button>}
+                      ? <span className="pill pill-green" style={{ fontSize: '13px', padding: '8px 18px' }}>✅ YOU'RE ON THE {SEASON} ROSTER</span>
+                      : <span style={{ fontSize: '13px', color: 'var(--muted)' }}>Roster spots are added by the commissioner — ping Luis to get in 🏈</span>}
                   </div>
 
                   {/* 💰 Live pots per game */}
@@ -1080,8 +1115,8 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
                 {new Date() < SEASON_KICKOFF && user && leaders.find(l => l.userId === user.uid)?.confirmed !== true && (
                   <div className="glass" style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '14px' }}>⏳ The {SEASON} season kicks off Sept 9 — lock in your spot!</span>
-                    <button className="btn btn-green" style={{ padding: '8px 16px', fontSize: '13px' }} onClick={() => setView('kickoff')}>🚀 Go to Kickoff</button>
+                    <span style={{ fontSize: '14px' }}>⏳ The {SEASON} season kicks off Sept 9 — you're not on the roster yet. Ping the commissioner!</span>
+                    <button className="btn btn-green" style={{ padding: '8px 16px', fontSize: '13px' }} onClick={() => setView('kickoff')}>🚀 View Kickoff</button>
                   </div>
                 )}
                 <div>
@@ -1130,7 +1165,7 @@ function App() {
                   </div>
                   {leaders.map((player) => {
                     const weekPicks = player[`week${currentWeek}`] ? Object.keys(player[`week${currentWeek}`]).length : 0;
-                    const isPaid = player[`paid_week${currentWeek}`] === true;
+                    const isPaid = isWeekPaid(player, currentWeek);
                     const streak = getCurrentStreak(player);
                     const fx = rowFx[player.userId];
                     return (
@@ -1450,7 +1485,7 @@ function App() {
                 {adminTab === 'overview' && (() => {
                   const entrants = getWeekEntrants();
                   const missing = leaders.filter(l => !l[`week${currentWeek}`] || Object.keys(l[`week${currentWeek}`]).length === 0);
-                  const unpaid = entrants.filter(l => l[`paid_week${currentWeek}`] !== true);
+                  const unpaid = entrants.filter(l => !isWeekPaid(l, currentWeek));
                   const pool = getSurvivorPlayers();
                   const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
                   const survUnpaid = pool.filter(p => p.survivor_paid !== true);
@@ -1529,14 +1564,14 @@ function App() {
                           <td className="matrix-sticky">
                             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                               <input type="checkbox" checked={selectedPaidUsers.includes(player.userId)} onChange={() => toggleSelectUser(player.userId)} />
-                              {getDisplayName(player)}
+                              {getDisplayName(player)}{player.prepaid_weekly === true ? ' 💵' : ''}
                             </label>
                           </td>
                           <td>
                             <button onClick={() => toggleSeasonPaid(player.userId, player.season_paid === true)} className="cell-chip" style={{ cursor: 'pointer', border: 'none', background: player.season_paid === true ? 'var(--gold-dim)' : 'rgba(255,255,255,0.05)', color: player.season_paid === true ? 'var(--gold)' : 'var(--muted)' }}>{player.season_paid === true ? '$' : '–'}</button>
                           </td>
                           {[...Array(18)].map((_, i) => i + 1).map(w => {
-                            const isPaid = player[`paid_week${w}`] === true;
+                            const isPaid = isWeekPaid(player, w);
                             return (
                               <td key={w}>
                                 <button onClick={() => toggleWeekPayment(player.userId, w, isPaid)} className={`cell-chip ${isPaid ? 'cell-correct' : 'cell-hidden'}`} style={{ cursor: 'pointer', border: 'none', background: isPaid ? 'var(--accent-dim)' : 'rgba(255,255,255,0.05)' }}>{isPaid ? '$' : '–'}</button>
@@ -1625,24 +1660,54 @@ function App() {
                     <input className="input" value={newPhoneInput} onChange={(e) => setNewPhoneInput(e.target.value)} placeholder="Phone (+15551234567)" />
                     <button className="btn btn-green" style={{ width: '100%', padding: '12px' }} onClick={addGuest}>Add Member</button>
                   </div>
-                  {guestList.map(email => (
-                    <div key={email} className="row" style={{ padding: '12px 4px' }}>
-                      <div>
-                        <span>{email}</span>
-                        {isPlayerAdmin(email) && <span className="pill pill-gold" style={{ marginLeft: '8px' }}>👑 ADMIN</span>}
-                        {nicknames[sanitizeEmail(email)] && <span style={{ marginLeft: '10px', color: 'var(--accent)' }}>({nicknames[sanitizeEmail(email)]})</span>}
-                        {phoneNumbers[sanitizeEmail(email)] && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>📞 {phoneNumbers[sanitizeEmail(email)]}</div>}
+                  {guestList.map(email => {
+                    const real = findRealPlayerByEmail(email);
+                    const ph = findPlaceholderByEmail(email);
+                    const target = real || ph;
+                    const confirmed = target?.confirmed === true;
+                    const allIn = target && target.prepaid_weekly === true && target.season_paid === true && target.survivor_paid === true;
+                    return (
+                    <div key={email} style={{ padding: '12px 4px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span>{email}</span>
+                          {isPlayerAdmin(email) && <span className="pill pill-gold" style={{ marginLeft: '8px' }}>👑 ADMIN</span>}
+                          {nicknames[sanitizeEmail(email)] && <span style={{ marginLeft: '10px', color: 'var(--accent)' }}>({nicknames[sanitizeEmail(email)]})</span>}
+                          {phoneNumbers[sanitizeEmail(email)] && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>📞 {phoneNumbers[sanitizeEmail(email)]}</div>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          {!isAdminEmail(email) && (
+                            <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '11px', color: 'var(--gold)', borderColor: 'rgba(255,201,77,0.35)' }} onClick={() => toggleAdminRole(email)}>
+                              {isPlayerAdmin(email) ? 'Remove Admin' : 'Make Admin'}
+                            </button>
+                          )}
+                          <button className="btn btn-danger" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => removeGuest(email)}>✕</button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        {!isAdminEmail(email) && (
-                          <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '11px', color: 'var(--gold)', borderColor: 'rgba(255,201,77,0.35)' }} onClick={() => toggleAdminRole(email)}>
-                            {isPlayerAdmin(email) ? 'Remove Admin' : 'Make Admin'}
+                      {/* 2026 roster + payment quick-actions */}
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '9px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button className={`btn ${confirmed ? 'btn-green' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => toggleRosterConfirm(email)}>
+                          {confirmed ? `✅ Playing ${SEASON}` : `＋ Mark as Playing ${SEASON}`}
+                        </button>
+                        {target && (
+                          <button className={`btn ${target.prepaid_weekly === true ? 'btn-green' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => togglePrepaidWeekly(target)}>
+                            {target.prepaid_weekly === true ? '💵 Weekly Prepaid ✓' : `💵 Prepay Weekly ($${17 * ENTRY_FEE + 20})`}
                           </button>
                         )}
-                        <button className="btn btn-danger" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => removeGuest(email)}>✕</button>
+                        {target && (
+                          <button className={`btn ${allIn ? 'btn-gold' : 'btn-ghost'}`} style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => toggleAllInPaid(target)}>
+                            {allIn ? '🎯 All-In Paid ✓' : `🎯 All-In Paid ($${17 * ENTRY_FEE + 20 + SEASON_POT_FEE + SURVIVOR_FEE})`}
+                          </button>
+                        )}
+                        {real && ph && (
+                          <button className="btn btn-gold" style={{ padding: '5px 11px', fontSize: '11px' }} onClick={() => mergePlaceholder(email)}>⚠ Merge duplicate ➜</button>
+                        )}
+                        {!target && <span style={{ fontSize: '11px', color: 'var(--muted)' }}>hasn't signed in yet — marking as playing creates their roster spot</span>}
+                        {ph && !real && <span className="pill pill-gold" style={{ fontSize: '9px' }}>ROSTER SPOT</span>}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div style={{ marginTop: '14px', fontSize: '11px', color: 'var(--muted)' }}>
                     👑 Founders (always admin): {ADMIN_EMAILS.join(' · ')}
                   </div>
