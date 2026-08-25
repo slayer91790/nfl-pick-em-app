@@ -12,6 +12,7 @@ const ENTRY_FEE = 10;
 const DOUBLE_FEE_WEEK = 12; // Thanksgiving "Double Gobble" week ($20) — Nov 26, 2026 is NFL Week 12; re-check each season!
 const SURVIVOR_FEE = 20;    // 🛡️ Survivor Pool: optional, one-time entry for the whole season
 const SEASON_POT_FEE = 20;  // 👑 Season Champ: one-time, most correct picks across the season wins
+const SEASON_KICKOFF = new Date('2026-09-09T20:20:00-04:00'); // Week 1 opener; the 🚀 Kickoff tab shows until then
 
 // Admins — keep in sync with the list in firestore.rules
 const ADMIN_EMAILS = ["slayer91790@gmail.com", "antoniodanielvazquez@gmail.com"];
@@ -77,7 +78,7 @@ function App() {
   const [news, setNews] = useState([]);
   const [leaders, setLeaders] = useState([]);
   const [currentWeek, setCurrentWeek] = useState(1);
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState(() => new Date() < SEASON_KICKOFF ? 'kickoff' : 'dashboard');
 
   const [picks, setPicks] = useState({});
   const [tiebreaker, setTiebreaker] = useState("");
@@ -229,6 +230,7 @@ function App() {
         survivor_optIn: idx < 6,
         survivor_paid: idx < 6 && idx % 2 === 0,
         season_paid: idx % 4 !== 1,
+        confirmed: idx < 7,
         [`survivor_week${currentWeek}`]: idx < 6 ? weekPicks[firstGame.id] : undefined
       };
     }));
@@ -632,6 +634,15 @@ function App() {
 
   // --- ACTIONS ---
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
+  const confirmSeason = async () => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, PICKS_COLLECTION, user.uid), {
+        userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
+        confirmed: true, confirmedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
   const handleLogout = () => { auth.signOut(); setView('dashboard'); };
 
   const selectTeam = (game, teamAbbr, targetPicksState, setTargetPicksState, adminMode = false) => {
@@ -945,6 +956,7 @@ function App() {
       ) : (
         <>
           <nav className="tabs">
+            {new Date() < SEASON_KICKOFF && <button className={`tab ${view === 'kickoff' ? 'active' : ''}`} onClick={() => setView('kickoff')}>🚀 Kickoff</button>}
             <button className={`tab ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>Dashboard</button>
             <button className={`tab ${view === 'picks' ? 'active' : ''}`} onClick={() => setView('picks')}>{hasSubmitted ? "✅ My Picks" : "Make Picks"}</button>
             <button className={`tab ${view === 'matrix' ? 'active' : ''}`} onClick={() => setView('matrix')}>All Picks</button>
@@ -960,9 +972,98 @@ function App() {
 
           <main style={{ maxWidth: '900px', margin: '0 auto', padding: '0 16px' }}>
 
+            {/* === 🚀 KICKOFF (pre-season lobby: confirm, costs, rules, tab guide) === */}
+            {view === 'kickoff' && (() => {
+              const msLeft = Math.max(0, SEASON_KICKOFF - new Date());
+              const days = Math.floor(msLeft / 86400000);
+              const hours = Math.floor((msLeft % 86400000) / 3600000);
+              const mins = Math.floor((msLeft % 3600000) / 60000);
+              const me = user ? leaders.find(l => l.userId === user.uid) : null;
+              const confirmedPlayers = leaders.filter(l => l.confirmed === true);
+              const weeklySeasonTotal = 17 * ENTRY_FEE + 20; // 17 normal weeks + Thanksgiving
+              const allInTotal = weeklySeasonTotal + SEASON_POT_FEE + SURVIVOR_FEE;
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '680px', margin: '0 auto' }}>
+
+                  {/* ⏳ Countdown + confirm */}
+                  <div className="pot-card">
+                    <div className="pot-label">🏈 Season {SEASON} kicks off in</div>
+                    <div className="pot-amount" style={{ fontSize: '44px' }}>{days}d {hours}h {mins}m</div>
+                    <div className="pot-sub">Wednesday, Sept 9 · picks lock at each game's kickoff</div>
+                    {me?.confirmed === true
+                      ? <span className="pill pill-green" style={{ fontSize: '13px', padding: '8px 18px' }}>✅ YOU'RE IN — SEE YOU WEEK 1</span>
+                      : <button className="cta" style={{ fontSize: '16px', padding: '13px 36px' }} onClick={confirmSeason}>✅ I'm In for {SEASON}</button>}
+                  </div>
+
+                  {/* 👥 Who's playing */}
+                  <div className="glass" style={{ overflow: 'hidden' }}>
+                    <div className="row" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <span className="section-label" style={{ margin: 0 }}>Who's Playing</span>
+                      <span className="section-label" style={{ margin: 0 }}>{confirmedPlayers.length} confirmed</span>
+                    </div>
+                    {confirmedPlayers.length === 0 && <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Nobody yet — be the first 🚀</div>}
+                    {confirmedPlayers.map(p => (
+                      <div key={p.userId} className="row">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Avatar src={p.photo} name={getDisplayName(p)} />
+                          <span style={{ fontWeight: 700 }}>{getDisplayName(p)}</span>
+                        </div>
+                        <span style={{ fontSize: '12px', color: 'var(--gold)' }}>{p.survivor_optIn === true ? '🛡️ + Survivor' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 💵 What it costs */}
+                  <div className="glass" style={{ padding: '20px 22px' }}>
+                    <h3 style={{ marginTop: 0, fontSize: '15px', color: 'var(--muted)' }}>💵 What It Costs</h3>
+                    <div className="welcome-game"><span className="wg-icon">🏈</span><div><b>Weekly Pick 'Em</b> — ${ENTRY_FEE} each week you play ($20 on Thanksgiving, Week {DOUBLE_FEE_WEEK}). All 18 weeks = ${weeklySeasonTotal}.</div></div>
+                    <div className="welcome-game"><span className="wg-icon">👑</span><div><b>Season Championship</b> — ${SEASON_POT_FEE} once, covers the whole season.</div></div>
+                    <div className="welcome-game"><span className="wg-icon">🛡️</span><div><b>Survivor Pool</b> — ${SURVIVOR_FEE} once. Totally optional.</div></div>
+                    <div className="welcome-game"><span className="wg-icon">⚡</span><div><b>Power Points</b> — free, runs automatically on your weekly picks.</div></div>
+                    <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '14px' }}>
+                      🎯 All-in for the season: <b style={{ color: 'var(--gold)' }}>${allInTotal}</b> &nbsp;·&nbsp; Weekly picks only: <b style={{ color: 'var(--accent)' }}>${weeklySeasonTotal}</b>
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: '14px' }}>
+                      <a className="btn btn-gold" style={{ textDecoration: 'none', display: 'inline-block' }} href="https://venmo.com/u/MrDoom" target="_blank" rel="noreferrer">Pay on Venmo → @MrDoom</a>
+                    </div>
+                  </div>
+
+                  {/* 📜 Rules */}
+                  <div className="glass" style={{ padding: '20px 22px' }}>
+                    <h3 style={{ marginTop: 0, fontSize: '15px', color: 'var(--muted)' }}>📜 The Rules</h3>
+                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--muted)', lineHeight: 1.9 }}>
+                      <li>Pick a winner for every game each week, plus the MNF total-score tiebreaker.</li>
+                      <li>Every game locks at its kickoff — no picks or changes after a game starts.</li>
+                      <li>Everyone's picks reveal automatically at each kickoff.</li>
+                      <li>Most correct picks wins the week; closest MNF total breaks ties.</li>
+                      <li>Survivor: one team per week, never reuse a team, lose and you're out.</li>
+                    </ul>
+                  </div>
+
+                  {/* 🗺️ Tab guide */}
+                  <div className="glass" style={{ padding: '20px 22px' }}>
+                    <h3 style={{ marginTop: 0, fontSize: '15px', color: 'var(--muted)' }}>🗺️ Around the App</h3>
+                    <div style={{ fontSize: '13px', lineHeight: 2.1 }}>
+                      <div><b style={{ color: 'var(--accent)' }}>Dashboard</b> — live scores, this week's pot, who's paid and picked</div>
+                      <div><b style={{ color: 'var(--accent)' }}>Make Picks</b> — lock in your weekly picks and tiebreaker</div>
+                      <div><b style={{ color: 'var(--accent)' }}>All Picks</b> — everyone's picks, standings, and win odds</div>
+                      <div><b style={{ color: 'var(--accent)' }}>Survivor</b> — the optional last-one-standing side game</div>
+                      <div><b style={{ color: 'var(--accent)' }}>Winners</b> — weekly winners, season championship, power standings</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* === DASHBOARD === */}
             {view === 'dashboard' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+                {new Date() < SEASON_KICKOFF && user && leaders.find(l => l.userId === user.uid)?.confirmed !== true && (
+                  <div className="glass" style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px' }}>⏳ The {SEASON} season kicks off Sept 9 — lock in your spot!</span>
+                    <button className="btn btn-green" style={{ padding: '8px 16px', fontSize: '13px' }} onClick={() => setView('kickoff')}>🚀 Go to Kickoff</button>
+                  </div>
+                )}
                 <div>
                   <div className="section-label">Live Scores</div>
                   <div className="score-strip">
@@ -1334,6 +1435,7 @@ function App() {
                   const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
                   const survUnpaid = pool.filter(p => p.survivor_paid !== true);
                   const seasonUnpaid = leaders.filter(l => l.season_paid !== true);
+                  const confirmedPlayers = leaders.filter(l => l.confirmed === true);
                   const nameList = (arr) => arr.length ? arr.map(getDisplayName).join(', ') : 'None 🎉';
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -1368,6 +1470,7 @@ function App() {
                           <div>💸 <b>Submitted but unpaid:</b> {nameList(unpaid)}</div>
                           <div>🛡️ <b>Survivor unpaid:</b> {nameList(survUnpaid)}</div>
                           <div>👑 <b>Season pot unpaid:</b> {nameList(seasonUnpaid)}</div>
+                          <div>🚀 <b>Confirmed for {SEASON}:</b> {confirmedPlayers.length ? `${confirmedPlayers.length} — ${confirmedPlayers.map(getDisplayName).join(', ')}` : 'Nobody yet'}</div>
                         </div>
                       </div>
                       {declaredWinner && !databaseWinners[currentWeek] && (
