@@ -465,7 +465,9 @@ function App() {
     });
     return correct + getCorrectCountForPlayer(player);
   };
-  const getSeasonStandings = () => leaders
+  // Season Championship is opt-in: only players who bought in (season_paid) compete
+  const getSeasonPotPlayers = () => leaders.filter(l => l.season_paid === true);
+  const getSeasonStandings = () => getSeasonPotPlayers()
     .map(p => ({ player: p, correct: getSeasonCorrectTotal(p) }))
     .sort((a, b) => b.correct - a.correct);
 
@@ -1075,8 +1077,8 @@ function App() {
                     </div>
                     <div className="glass" style={{ padding: '16px', textAlign: 'center' }}>
                       <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Pot</div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--gold)' }}>${confirmedPlayers.length * SEASON_POT_FEE}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>whole season · {confirmedPlayers.length} in</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--gold)' }}>${getSeasonPotPlayers().length * SEASON_POT_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>whole season · {getSeasonPotPlayers().length} in</div>
                     </div>
                     <div className="glass" style={{ padding: '16px', textAlign: 'center' }}>
                       <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>🛡️ Survivor Pot</div>
@@ -1085,7 +1087,7 @@ function App() {
                     </div>
                     <div className="glass" style={{ padding: '16px', textAlign: 'center', borderColor: 'rgba(0,229,137,0.35)' }}>
                       <div className="section-label" style={{ margin: 0, color: 'var(--accent)' }}>💰 Total In Play</div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)', textShadow: '0 0 25px var(--accent-glow)' }}>${confirmedPlayers.length * weeklySeasonTotal + confirmedPlayers.length * SEASON_POT_FEE + survPool.length * SURVIVOR_FEE}</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)', textShadow: '0 0 25px var(--accent-glow)' }}>${confirmedPlayers.length * weeklySeasonTotal + getSeasonPotPlayers().length * SEASON_POT_FEE + survPool.length * SURVIVOR_FEE}</div>
                       <div style={{ fontSize: '11px', color: 'var(--muted)' }}>all 18 weekly pots + season + survivor</div>
                     </div>
                   </div>
@@ -1103,7 +1105,7 @@ function App() {
                           <Avatar src={p.photo} name={getDisplayName(p)} />
                           <span style={{ fontWeight: 700 }}>{getDisplayName(p)}</span>
                         </div>
-                        <span style={{ fontSize: '12px', color: 'var(--gold)' }}>{p.survivor_optIn === true ? '🛡️ + Survivor' : ''}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--gold)' }}>{[p.season_paid === true ? '👑 Season' : null, p.survivor_optIn === true ? '🛡️ Survivor' : null].filter(Boolean).join(' · ')}</span>
                       </div>
                     ))}
                   </div>
@@ -1322,19 +1324,18 @@ function App() {
                 {/* 👑 SEASON CHAMPIONSHIP (real-money season-long game) */}
                 <div className="glass" style={{ overflow: 'hidden', marginTop: '20px' }}>
                   <div className="row" style={{ background: 'rgba(255,255,255,0.03)', justifyContent: 'center' }}>
-                    <span className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Championship · ${leaders.length * SEASON_POT_FEE} Pot</span>
+                    <span className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Championship · ${getSeasonPotPlayers().length * SEASON_POT_FEE} Pot</span>
                   </div>
                   <div style={{ padding: '10px 18px 0 18px', fontSize: '11px', color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
-                    Most correct picks across the whole season takes the pot — ${SEASON_POT_FEE} per player, every single week counts.
+                    Most correct picks across the whole season takes the pot — ${SEASON_POT_FEE} buy-in, every single week counts. {getSeasonPotPlayers().length} in.
                   </div>
-                  {leaders.length === 0
-                    ? <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Standings appear once picks start.</div>
+                  {getSeasonPotPlayers().length === 0
+                    ? <div style={{ padding: '18px', textAlign: 'center', color: 'var(--muted)' }}>Nobody's bought into the season pot yet — see the commissioner.</div>
                     : getSeasonStandings().map((e, i) => (
                       <div key={e.player.userId} className="row standing-row" ref={el => { const k = `szn-${e.player.userId}`; if (el) standingRowRefs.current.set(k, el); else standingRowRefs.current.delete(k); }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           <span style={{ color: 'var(--muted)', fontWeight: 700, width: '22px' }}>{i + 1}.</span>
                           <span style={{ fontWeight: 700 }}>{i === 0 ? '👑 ' : ''}{getDisplayName(e.player)}</span>
-                          {e.player.season_paid !== true && <span className="pill pill-red">UNPAID</span>}
                         </div>
                         <span style={{ fontWeight: 800, color: 'var(--accent)' }}>{e.correct} correct</span>
                       </div>
@@ -1529,8 +1530,9 @@ function App() {
                   const pool = getSurvivorPlayers();
                   const aliveCount = pool.filter(p => getSurvivorState(p).alive).length;
                   const survUnpaid = pool.filter(p => p.survivor_paid !== true);
-                  const seasonUnpaid = leaders.filter(l => l.season_paid !== true);
+                  const seasonPotIn = leaders.filter(l => l.season_paid === true);
                   const confirmedPlayers = leaders.filter(l => l.confirmed === true);
+                  const seasonNotIn = confirmedPlayers.filter(l => l.season_paid !== true);
                   const nameList = (arr) => arr.length ? arr.map(getDisplayName).join(', ') : 'None 🎉';
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -1547,8 +1549,8 @@ function App() {
                         </div>
                         <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
                           <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Pot</div>
-                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--gold)' }}>${leaders.length * SEASON_POT_FEE}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{leaders.length} players · {leaders.length - seasonUnpaid.length} paid</div>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: '38px', fontWeight: 700, color: 'var(--gold)' }}>${seasonPotIn.length * SEASON_POT_FEE}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{seasonPotIn.length} bought in</div>
                         </div>
                         <div className="glass" style={{ padding: '18px', textAlign: 'center' }}>
                           <div className="section-label" style={{ margin: 0 }}>Week Status</div>
@@ -1564,7 +1566,7 @@ function App() {
                           <div>⏳ <b>Missing picks:</b> {nameList(missing)}</div>
                           <div>💸 <b>Submitted but unpaid:</b> {nameList(unpaid)}</div>
                           <div>🛡️ <b>Survivor unpaid:</b> {nameList(survUnpaid)}</div>
-                          <div>👑 <b>Season pot unpaid:</b> {nameList(seasonUnpaid)}</div>
+                          <div>👑 <b>Playing but not in the season pot:</b> {nameList(seasonNotIn)}</div>
                           <div>🚀 <b>Confirmed for {SEASON}:</b> {confirmedPlayers.length ? `${confirmedPlayers.length} — ${confirmedPlayers.map(getDisplayName).join(', ')}` : 'Nobody yet'}</div>
                         </div>
                       </div>
