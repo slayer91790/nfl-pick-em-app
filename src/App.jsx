@@ -980,6 +980,7 @@ function App() {
               const mins = Math.floor((msLeft % 3600000) / 60000);
               const me = user ? leaders.find(l => l.userId === user.uid) : null;
               const confirmedPlayers = leaders.filter(l => l.confirmed === true);
+              const survPool = getSurvivorPlayers();
               const weeklySeasonTotal = 17 * ENTRY_FEE + 20; // 17 normal weeks + Thanksgiving
               const allInTotal = weeklySeasonTotal + SEASON_POT_FEE + SURVIVOR_FEE;
               return (
@@ -993,6 +994,25 @@ function App() {
                     {me?.confirmed === true
                       ? <span className="pill pill-green" style={{ fontSize: '13px', padding: '8px 18px' }}>✅ YOU'RE IN — SEE YOU WEEK 1</span>
                       : <button className="cta" style={{ fontSize: '16px', padding: '13px 36px' }} onClick={confirmSeason}>✅ I'm In for {SEASON}</button>}
+                  </div>
+
+                  {/* 💰 Live pots per game */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
+                    <div className="glass" style={{ padding: '16px', textAlign: 'center' }}>
+                      <div className="section-label" style={{ margin: 0 }}>🏈 Weekly Pot</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)' }}>${confirmedPlayers.length * ENTRY_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>every week · {confirmedPlayers.length} in</div>
+                    </div>
+                    <div className="glass" style={{ padding: '16px', textAlign: 'center' }}>
+                      <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>👑 Season Pot</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--gold)' }}>${confirmedPlayers.length * SEASON_POT_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>whole season · {confirmedPlayers.length} in</div>
+                    </div>
+                    <div className="glass" style={{ padding: '16px', textAlign: 'center' }}>
+                      <div className="section-label" style={{ margin: 0, color: 'var(--gold)' }}>🛡️ Survivor Pot</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--gold)' }}>${survPool.length * SURVIVOR_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>last standing · {survPool.length} entered</div>
+                    </div>
                   </div>
 
                   {/* 👥 Who's playing */}
