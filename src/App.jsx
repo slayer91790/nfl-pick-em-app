@@ -1040,8 +1040,27 @@ function App() {
           );
         })}
         <div className="glass tb-card">
-          <h3 style={{ margin: '0 0 12px 0' }}>Tiebreaker · MNF Total</h3>
-          <input type="number" className="tb-input" value={targetTiebreaker} onChange={(e) => { if (adminMode || !hasSubmitted) setTargetTiebreaker(e.target.value); }} placeholder="45" readOnly={!adminMode && hasSubmitted} />
+          {(() => {
+            const mnf = getMnfGame();
+            const comp = mnf?.competitions?.[0]?.competitors || [];
+            const tbAway = comp.find(c => c.homeAway === 'away')?.team.abbreviation;
+            const tbHome = comp.find(c => c.homeAway === 'home')?.team.abbreviation;
+            const nightGames = mnf?.date ? games.filter(g => g.date && new Date(g.date).toDateString() === new Date(mnf.date).toDateString()).length : 0;
+            const when = mnf?.date ? new Date(mnf.date).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+            return (<>
+              <h3 style={{ margin: '0 0 6px 0' }}>Tiebreaker · MNF Total</h3>
+              {mnf && tbAway && tbHome && (
+                <div style={{ fontSize: '14px', color: 'var(--accent)', fontWeight: 800, marginBottom: '4px' }}>{tbAway} @ {tbHome}{when ? ` · ${when}` : ''}</div>
+              )}
+              {nightGames > 1 && tbAway && (
+                <div style={{ fontSize: '12px', color: 'var(--gold)', fontWeight: 700, marginBottom: '6px' }}>⚠ {nightGames} games that night — the tiebreaker is the LAST one: {tbAway} @ {tbHome}</div>
+              )}
+              <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '12px', lineHeight: 1.6 }}>
+                Guess both teams' combined final score (a 24–21 game = 45). Closest guess wins if the week ends in a tie.
+              </div>
+              <input type="number" className="tb-input" value={targetTiebreaker} onChange={(e) => { if (adminMode || !hasSubmitted) setTargetTiebreaker(e.target.value); }} placeholder="45" readOnly={!adminMode && hasSubmitted} />
+            </>);
+          })()}
         </div>
     </div>
   );
@@ -1238,7 +1257,7 @@ function App() {
                   <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: 'var(--muted)', lineHeight: 1.8 }}>
                     <li>Each game locks at its kickoff — no picks after a game starts.</li>
                     <li>Thanksgiving Week (Week {DOUBLE_FEE_WEEK}) fee is $20 (Double Gobble Week).</li>
-                    <li>Tiebreaker: guess the total score of the Monday Night game.</li>
+                    <li>Tiebreaker: both teams' combined score in the LAST Monday night game (when there are two MNF games, it's the late one).</li>
                     <li>No changes after submission.</li>
                   </ul>
                 </div>
