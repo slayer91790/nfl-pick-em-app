@@ -434,18 +434,14 @@ function App() {
     games.forEach((game) => { if (game.winner && weekPicks[game.id] === game.winner) correct++; });
     return correct;
   };
+  // Expected wins: real correct picks + the live win probability of every unfinished pick
   const getProjectedWins = (player) => {
-    let score = getCorrectCountForPlayer(player);
+    const weekPicks = player[`week${currentWeek}`] || {};
+    let exp = getCorrectCountForPlayer(player);
     games.forEach(g => {
-        // Unfinished games only — state check covers "Final/OT" etc., which the old
-        // shortDetail === 'Final' comparison missed (double-counting OT finals)
-        if (g.status?.type?.state !== 'post' && g.oddsString && g.oddsString.includes('-')) {
-             const favTeam = g.oddsString.split(' ')[0];
-             const weekPicks = player[`week${currentWeek}`] || {};
-             if (weekPicks[g.id] === favTeam) score++;
-        }
+        if (g.status?.type?.state !== 'post' && weekPicks[g.id]) exp += getTeamWinProb(g, weekPicks[g.id]);
     });
-    return score;
+    return exp;
   };
 
   // 🔥 Current streak: consecutive correct picks in kickoff order, counting back
@@ -555,37 +551,31 @@ function App() {
     return scores.reduce((a, b) => a + b, 0);
   };
 
-  // 🔥 GAP PENALTY MATH (Dominant Leader Logic)
-  const getWinProbability = (player, allPlayers) => {
-      if (!games.length) return 0;
-      const correct = getCorrectCountForPlayer(player);
-      const remaining = games.filter(g => !g.winner).length;
-      const leaderScore = Math.max(0, ...allPlayers.map(p => getCorrectCountForPlayer(p)));
-      const maxPossible = correct + remaining;
-
-      if (maxPossible < leaderScore) return 0; // Eliminated
-
-      const bestProjection = Math.max(0, ...allPlayers.map(p => {
-          const pCorrect = getCorrectCountForPlayer(p);
-          if ((pCorrect + remaining) < leaderScore) return 0; // Ignore eliminated
-          return getProjectedWins(p);
-      }));
-
-      // Gap weight: every projected point behind the best cuts the chance in half
-      const calculateWeight = (p) => {
-          const pCorrect = getCorrectCountForPlayer(p);
-          if ((pCorrect + remaining) < leaderScore) return 0;
-          const gap = Math.max(0, bestProjection - getProjectedWins(p));
-          return 100 / Math.pow(2, gap);
-      };
-
-      const myWeight = calculateWeight(player);
-      if (myWeight === 0) return 0;
-
-      let totalWeight = 0;
-      allPlayers.forEach(p => { totalWeight += calculateWeight(p); });
-
-      return Math.round((myWeight / totalWeight) * 100);
+  // 🎲 LIVE WIN ODDS
+  // Each team's chance to win its game: finals are certain; pre-game comes from the
+  // Vegas line (normal model, sigma ~13.5 pts); live games blend the current margin
+  // with the rest of the line over the time remaining.
+  const NFL_SIGMA = 13.5;
+  const normCdf = (x) => 1 / (1 + Math.exp(-1.702 * x)); // logistic approx of Φ
+  const getTeamWinProb = (game, abbr) => {
+    const state = game.status?.type?.state;
+    if (state === 'post') {
+      if (game.winner === abbr) return 1;
+      return game.winner ? 0 : 0.5; // tie
+    }
+    const comp = game.competitions?.[0]?.competitors || [];
+    const me = comp.find(c => c.team.abbreviation === abbr);
+    const opp = comp.find(c => c.team.abbreviation !== abbr);
+    if (!me || !opp) return 0.5;
+    const match = (game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/);
+    const spread = match ? (match[1] === abbr ? parseFloat(match[2]) : -parseFloat(match[2])) : 0;
+    if (state !== 'in') return normCdf(spread / NFL_SIGMA);
+    const margin = (parseInt(me.score, 10) || 0) - (parseInt(opp.score, 10) || 0);
+    const period = game.status?.period || 1;
+    const clock = typeof game.status?.clock === 'number' ? game.status.clock : 900;
+    const secsLeft = period >= 5 ? Math.min(clock, 600) : Math.max(0, (4 - period) * 900 + clock);
+    const frac = Math.max(0.001, Math.min(1, secsLeft / 3600));
+    return normCdf((margin + spread * frac) / (NFL_SIGMA * Math.sqrt(frac)));
   };
 
   // A winner is only declared when it's real: admin-finalized, all games final,
@@ -641,6 +631,42 @@ function App() {
       });
       return history.sort((a, b) => a.week - b.week);
   };
+
+  // 🎲 Odds of winning the week: 2,000 Monte Carlo simulations of the remaining games.
+  // Ties split the win. Seeded RNG so the numbers are stable between re-renders.
+  const weekWinOdds = useMemo(() => {
+    if (!games.length || !leaders.length) return {};
+    const players = leaders.filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0);
+    if (!players.length) return {};
+    const open = games.filter(g => g.status?.type?.state !== 'post');
+    const gameProbs = open.map(g => {
+      const comp = g.competitions?.[0]?.competitors || [];
+      const away = comp.find(c => c.homeAway === 'away')?.team.abbreviation;
+      const home = comp.find(c => c.homeAway === 'home')?.team.abbreviation;
+      return { id: g.id, away, home, pAway: away ? getTeamWinProb(g, away) : 0.5 };
+    });
+    const picks = players.map(p => p[`week${currentWeek}`] || {});
+    const baseCorrect = players.map(p => getCorrectCountForPlayer(p));
+    let seed = 0xA5EED + Number(currentWeek) | 0;
+    const rand = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const N = 2000;
+    const wins = new Array(players.length).fill(0);
+    for (let s = 0; s < N; s++) {
+      const totals = baseCorrect.slice();
+      for (const gp of gameProbs) {
+        const winner = rand() < gp.pAway ? gp.away : gp.home;
+        for (let i = 0; i < players.length; i++) if (picks[i][gp.id] === winner) totals[i]++;
+      }
+      let max = -1;
+      for (const t of totals) if (t > max) max = t;
+      const tied = [];
+      for (let i = 0; i < totals.length; i++) if (totals[i] === max) tied.push(i);
+      const share = 1 / tied.length;
+      for (const i of tied) wins[i] += share;
+    }
+    return Object.fromEntries(players.map((p, i) => [p.userId, wins[i] / N]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [games, leaders, currentWeek]);
 
   // --- ACTIONS ---
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
@@ -1278,7 +1304,8 @@ function App() {
                       {[...leaders].sort((a,b) => getCorrectCountForPlayer(b) - getCorrectCountForPlayer(a)).map(player => {
                         const playerPicks = player[`week${currentWeek}`] || {};
                         const isSelf = user && player.userId === user.uid;
-                        const prob = getWinProbability(player, leaders);
+                        const odds = weekWinOdds[player.userId] || 0;
+                        const pct = Math.round(odds * 100);
                         const isDeclared = declaredWinner && declaredWinner.userId === player.userId;
                         const playerTb = getTiebreakerFor(player, currentWeek);
                         const showTb = picksVisible || isAdmin || isSelf || mnfLocked;
@@ -1304,9 +1331,9 @@ function App() {
                             </td>
                             <td style={{ color: 'var(--accent)', fontWeight: 800 }}>{getCorrectCountForPlayer(player)}</td>
                             <td style={{ color: 'var(--blue)', fontWeight: 800 }}>{getPowerPointsForPlayer(player)}</td>
-                            <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{getProjectedWins(player)}</td>
-                            <td style={{ fontWeight: 800, color: prob > 0 ? 'var(--accent)' : 'var(--muted)' }}>
-                              {isDeclared ? "🏆" : prob === 0 ? "❌" : prob >= 100 ? "99%" : `${prob}%`}
+                            <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{getProjectedWins(player).toFixed(1)}</td>
+                            <td style={{ fontWeight: 800, color: odds > 0 ? 'var(--accent)' : 'var(--muted)' }}>
+                              {isDeclared ? "🏆" : odds === 0 ? "❌" : pct >= 100 ? "99%" : pct === 0 ? "<1%" : `${pct}%`}
                             </td>
                           </tr>
                         )
