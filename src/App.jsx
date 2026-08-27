@@ -1297,7 +1297,11 @@ function App() {
                   <table className="matrix-table">
                     <thead><tr>
                       <th className="matrix-sticky">Player</th>
-                      {games.map(g => { const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation; return <th key={g.id}>{away}</th> })}
+                      {games.map(g => {
+                        const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation;
+                        const home = g.competitions[0].competitors.find(c => c.homeAway === 'home')?.team.abbreviation;
+                        return <th key={g.id}><div>{away}</div><div style={{ color: 'var(--muted)', fontWeight: 600 }}>@{home}</div></th>;
+                      })}
                       <th>Tie</th><th>Correct</th><th style={{ color: 'var(--blue)' }}>⚡Pwr</th><th style={{ color: 'var(--gold)' }}>Proj</th><th style={{ color: 'var(--accent)' }}>Win %</th>
                     </tr></thead>
                     <tbody>
