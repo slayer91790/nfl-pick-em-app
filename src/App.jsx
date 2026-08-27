@@ -104,6 +104,7 @@ function App() {
   const [adminTargetTiebreaker, setAdminTargetTiebreaker] = useState("");
   const [adminProfileEmail, setAdminProfileEmail] = useState("");
   const [adminProfilePhone, setAdminProfilePhone] = useState("");
+  const [adminProfileName, setAdminProfileName] = useState("");
 
   const [skullPop, setSkullPop] = useState(null); // 💀 { gameId, side } — synced to the underdog sound
   const skullTimerRef = useRef(null);
@@ -409,7 +410,7 @@ function App() {
   const getWeekPlayers = () => leaders.filter(l =>
     (l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0) || isWeekPaid(l, currentWeek));
   const getCurrentPot = () => getWeekPlayers().length * getWeeklyFee();
-  const getDisplayName = (player) => nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
+  const getDisplayName = (player) => nicknames[sanitizeEmail(player.email)] || nicknames[sanitizeEmail(player.userId)] || nicknames[player.userId] || player.userName || "Player";
 
   // A game locks at kickoff — no picking it after it starts.
   const isGameLocked = (game) => {
@@ -902,12 +903,16 @@ function App() {
       alert(`✅ Saved for ${getDisplayName(adminTargetUser)}!`);
     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
-  const updateGuestPhone = async () => {
+  const updateGuestInfo = async () => {
      if (!adminProfileEmail) return;
      try {
+       const name = adminProfileName.trim();
+       await updateDoc(doc(db, "config", "settings"), {
+         [`nicknames.${sanitizeEmail(adminProfileEmail)}`]: name ? name : deleteField()
+       });
        await setDoc(doc(db, "config", "private"), { phones: { [sanitizeEmail(adminProfileEmail)]: adminProfilePhone } }, { merge: true });
-       alert(`✅ Updated phone for ${adminProfileEmail}`);
-       setAdminProfileEmail(""); setAdminProfilePhone("");
+       alert(`✅ Updated ${name || adminProfileEmail}`);
+       setAdminProfileEmail(""); setAdminProfilePhone(""); setAdminProfileName("");
      } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
   const finalizeWeekWinner = async () => {
@@ -1098,8 +1103,8 @@ function App() {
                     </div>
                     <div className="glass" style={{ padding: '16px', textAlign: 'center', borderColor: 'rgba(0,229,137,0.35)' }}>
                       <div className="section-label" style={{ margin: 0, color: 'var(--accent)' }}>💰 Total In Play</div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)', textShadow: '0 0 25px var(--accent-glow)' }}>${confirmedPlayers.length * weeklySeasonTotal + getSeasonPotPlayers().length * SEASON_POT_FEE + survPool.length * SURVIVOR_FEE}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>all 18 weekly pots + season + survivor</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 700, color: 'var(--accent)', textShadow: '0 0 25px var(--accent-glow)' }}>${confirmedPlayers.length * ENTRY_FEE + getSeasonPotPlayers().length * SEASON_POT_FEE + survPool.length * SURVIVOR_FEE}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>weekly + season + survivor</div>
                     </div>
                   </div>
 
@@ -1702,17 +1707,18 @@ function App() {
 
                 {/* --- PLAYERS --- */}
                 {adminTab === 'players' && (<>
-                {/* Update Phone */}
+                {/* Edit member (name + phone) */}
                 <div className="glass" style={{ padding: '20px' }}>
-                  <h3 style={{ marginTop: 0 }}>✏️ Update Member Phone</h3>
-                  <select className="select" style={{ width: '100%', marginBottom: '14px' }} value={adminProfileEmail} onChange={(e) => { setAdminProfileEmail(e.target.value); setAdminProfilePhone(phoneNumbers[sanitizeEmail(e.target.value)] || ""); }}>
+                  <h3 style={{ marginTop: 0 }}>✏️ Edit Member</h3>
+                  <select className="select" style={{ width: '100%', marginBottom: '14px' }} value={adminProfileEmail} onChange={(e) => { setAdminProfileEmail(e.target.value); setAdminProfilePhone(phoneNumbers[sanitizeEmail(e.target.value)] || ""); setAdminProfileName(nicknames[sanitizeEmail(e.target.value)] || ""); }}>
                       <option value="">-- Select Member --</option>
                       {guestList.map(email => <option key={email} value={email}>{nicknames[sanitizeEmail(email)] ? `${nicknames[sanitizeEmail(email)]} (${email})` : email}</option>)}
                   </select>
                   {adminProfileEmail && (
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                          <input className="input" style={{ flex: 1 }} value={adminProfilePhone} onChange={(e) => setAdminProfilePhone(e.target.value)} placeholder="Phone Number" />
-                          <button className="btn btn-green" onClick={updateGuestPhone}>Update</button>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                          <input className="input" style={{ flex: '2 1 200px' }} value={adminProfileName} onChange={(e) => setAdminProfileName(e.target.value)} placeholder="First & Last Name (shown everywhere)" />
+                          <input className="input" style={{ flex: '1 1 150px' }} value={adminProfilePhone} onChange={(e) => setAdminProfilePhone(e.target.value)} placeholder="Phone Number" />
+                          <button className="btn btn-green" onClick={updateGuestInfo}>Save</button>
                       </div>
                   )}
                 </div>
