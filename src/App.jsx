@@ -437,7 +437,9 @@ function App() {
   const getProjectedWins = (player) => {
     let score = getCorrectCountForPlayer(player);
     games.forEach(g => {
-        if (g.status.type.shortDetail !== 'Final' && g.oddsString && g.oddsString.includes('-')) {
+        // Unfinished games only — state check covers "Final/OT" etc., which the old
+        // shortDetail === 'Final' comparison missed (double-counting OT finals)
+        if (g.status?.type?.state !== 'post' && g.oddsString && g.oddsString.includes('-')) {
              const favTeam = g.oddsString.split(' ')[0];
              const weekPicks = player[`week${currentWeek}`] || {};
              if (weekPicks[g.id] === favTeam) score++;
