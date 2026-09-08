@@ -167,10 +167,13 @@ function App() {
       setWeekScores(data.weekScores || {});
       if (data.phones) legacyPhonesRef.current = data.phones;
 
-      const email = user.email.toLowerCase();
-      const isDynamicAdmin = (data.adminEmails || []).some(e => e.toLowerCase() === email);
-      const ok = isAdminEmail(email) || isDynamicAdmin || (data.allowedEmails || []).some(e => e.toLowerCase() === email);
-      if (!ok) { alert("🚫 Access Denied"); auth.signOut(); return; }
+      const email = user.email.toLowerCase().trim();
+      const isDynamicAdmin = (data.adminEmails || []).some(e => String(e).toLowerCase().trim() === email);
+      const ok = isAdminEmail(email) || isDynamicAdmin || (data.allowedEmails || []).some(e => String(e).toLowerCase().trim() === email);
+      if (!ok) {
+        alert(`🚫 Access Denied for:\n${user.email}\n\nIf that's the wrong account, sign in again and pick the right Google account. Otherwise, send this exact email to the commissioner to get added.`);
+        auth.signOut(); return;
+      }
 
       setAllowed(true);
       setIsAdmin(isAdminEmail(email) || isDynamicAdmin);
