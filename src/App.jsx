@@ -872,6 +872,13 @@ function App() {
         : { prepaid_weekly: true, season_paid: true, survivor_paid: true, survivor_optIn: true });
     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };
+  const deletePlaceholder = async (email) => {
+    const ph = findPlaceholderByEmail(email);
+    if (!ph) return;
+    if (!window.confirm(`Remove the roster spot for ${email}? (Their real account, if any, is untouched — re-mark payments there.)`)) return;
+    try { await deleteDoc(doc(db, PICKS_COLLECTION, ph.userId)); }
+    catch (e) { console.error(e); alert("Error: " + e.message); }
+  };
   const mergePlaceholder = async (email) => {
     const ph = findPlaceholderByEmail(email);
     const real = findRealPlayerByEmail(email);
@@ -1840,6 +1847,7 @@ function App() {
                         )}
                         {!target && <span style={{ fontSize: '11px', color: 'var(--muted)' }}>hasn't signed in yet — marking as playing creates their roster spot</span>}
                         {ph && !real && <span className="pill pill-gold" style={{ fontSize: '9px' }}>ROSTER SPOT</span>}
+                        {ph && <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: '11px' }} onClick={() => deletePlaceholder(email)}>🗑 Remove spot</button>}
                       </div>
                     </div>
                     );
