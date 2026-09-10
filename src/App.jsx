@@ -790,10 +790,12 @@ function App() {
     if (usedBefore.includes(abbr)) { alert(`You already used ${abbr} this season.`); return; }
     if (!window.confirm(`Use ${abbr} for Week ${currentWeek}? You won't be able to pick them again this season.`)) return;
     try {
+      if (!game.date) { alert("Can't lock this game's kickoff time — try again in a minute."); return; }
       await setDoc(doc(db, PICKS_COLLECTION, user.uid), {
         userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
         [`survivor_week${currentWeek}`]: abbr,
-        [`survivor_week${currentWeek}_pickedAt`]: serverTimestamp()
+        [`survivor_week${currentWeek}_pickedAt`]: serverTimestamp(),
+        [`survivor_week${currentWeek}_lockAt`]: new Date(game.date) // server-side lock: rules refuse changes after kickoff
       }, { merge: true });
     } catch (e) { console.error(e); alert("Error: " + e.message); }
   };

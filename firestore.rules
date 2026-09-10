@@ -53,6 +53,44 @@ service cloud.firestore {
               'paid_week16', 'paid_week17', 'paid_week18'];
     }
 
+    // Survivor picks lock at their team's kickoff. The app stores that kickoff as
+    // survivor_week<N>_lockAt; once it passes, non-admins can't change the pick.
+    // A new/changed pick must carry a kickoff in the next 8 days — which also blocks
+    // picking a game that already started and faking a far-future lock time.
+    function svKickoffOk(lockKey) {
+      return lockKey in request.resource.data &&
+             request.resource.data[lockKey] > request.time &&
+             request.resource.data[lockKey] <= request.time + duration.value(8, 'd');
+    }
+    function svUpdateOk(ch, w) {
+      let key = 'survivor_week' + w;
+      let lockKey = key + '_lockAt';
+      return !ch.hasAny([key, lockKey]) || (
+        !(lockKey in resource.data && request.time >= resource.data[lockKey]) &&
+        svKickoffOk(lockKey)
+      );
+    }
+    function survivorUpdateOk() {
+      let ch = request.resource.data.diff(resource.data).affectedKeys();
+      return svUpdateOk(ch, '1') && svUpdateOk(ch, '2') && svUpdateOk(ch, '3') &&
+             svUpdateOk(ch, '4') && svUpdateOk(ch, '5') && svUpdateOk(ch, '6') &&
+             svUpdateOk(ch, '7') && svUpdateOk(ch, '8') && svUpdateOk(ch, '9') &&
+             svUpdateOk(ch, '10') && svUpdateOk(ch, '11') && svUpdateOk(ch, '12') &&
+             svUpdateOk(ch, '13') && svUpdateOk(ch, '14') && svUpdateOk(ch, '15') &&
+             svUpdateOk(ch, '16') && svUpdateOk(ch, '17') && svUpdateOk(ch, '18');
+    }
+    function svCreateOk(w) {
+      let key = 'survivor_week' + w;
+      return !(key in request.resource.data) || svKickoffOk(key + '_lockAt');
+    }
+    function survivorCreateOk() {
+      return svCreateOk('1') && svCreateOk('2') && svCreateOk('3') && svCreateOk('4') &&
+             svCreateOk('5') && svCreateOk('6') && svCreateOk('7') && svCreateOk('8') &&
+             svCreateOk('9') && svCreateOk('10') && svCreateOk('11') && svCreateOk('12') &&
+             svCreateOk('13') && svCreateOk('14') && svCreateOk('15') && svCreateOk('16') &&
+             svCreateOk('17') && svCreateOk('18');
+    }
+
     // League settings: allowlist, nicknames, declared winners, picksVisible.
     match /config/settings {
       allow read: if isSignedIn(); // needed to check the allowlist right after login
@@ -71,13 +109,15 @@ service cloud.firestore {
       allow create: if picksCollection.matches('picks_20[0-9][0-9]') && (
         isAdmin() ||
         (isMember() && request.auth.uid == userId &&
-         !request.resource.data.keys().hasAny(paidFields()))
+         !request.resource.data.keys().hasAny(paidFields()) &&
+         survivorCreateOk())
       );
 
       allow update: if picksCollection.matches('picks_20[0-9][0-9]') && (
         isAdmin() ||
         (isMember() && request.auth.uid == userId &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(paidFields()))
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(paidFields()) &&
+         survivorUpdateOk())
       );
 
       allow delete: if picksCollection.matches('picks_20[0-9][0-9]') && isAdmin();
