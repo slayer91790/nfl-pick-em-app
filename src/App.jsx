@@ -76,7 +76,13 @@ function App() {
 
   const [games, setGames] = useState([]);
   const [news, setNews] = useState([]);
-  const [leaders, setLeaders] = useState([]);
+  const [leadersRaw, setLeadersRaw] = useState([]);
+  // Display list: a roster-spot placeholder is hidden once its person has a real account
+  const leaders = useMemo(() => {
+    const isPh = (l) => String(l.userId).startsWith('guest_');
+    const realEmails = new Set(leadersRaw.filter(l => !isPh(l)).map(l => (l.email || '').toLowerCase()));
+    return leadersRaw.filter(l => !(isPh(l) && realEmails.has((l.placeholderFor || l.email || '').toLowerCase())));
+  }, [leadersRaw]);
   const [currentWeek, setCurrentWeek] = useState(1);
   const [view, setView] = useState(() => new Date() < SEASON_KICKOFF ? 'kickoff' : 'dashboard');
 
@@ -207,9 +213,9 @@ function App() {
 
   // --- 3. Picks collection (live — replaces polling + page reloads) ---
   useEffect(() => {
-    if (!allowed || PREVIEW) { if (!PREVIEW) setLeaders([]); return; }
+    if (!allowed || PREVIEW) { if (!PREVIEW) setLeadersRaw([]); return; }
     const unsubscribe = onSnapshot(collection(db, PICKS_COLLECTION), (snap) => {
-      setLeaders(snap.docs.map(d => d.data()));
+      setLeadersRaw(snap.docs.map(d => d.data()));
     }, (err) => console.error("Picks listener failed", err));
     return () => unsubscribe();
   }, [allowed]);
@@ -218,7 +224,7 @@ function App() {
   useEffect(() => {
     if (!PREVIEW || !games.length) return;
     const names = ['Luis S.', 'Albert H.', 'Osvaldo S.', 'Art V.', 'Roman G.', 'Timothy A.', 'Andy R.', 'Louis G.'];
-    setLeaders(names.map((n, idx) => {
+    setLeadersRaw(names.map((n, idx) => {
       const weekPicks = {};
       games.forEach((g, i) => {
         const comp = g.competitions[0].competitors;
@@ -239,6 +245,8 @@ function App() {
       };
     }));
     const uid = (i) => i === 0 ? 'preview-me' : `preview-${i}`;
+    // A stale roster spot for Albert (who has a real account above) — should be hidden by the dedupe
+    setLeadersRaw(prev => [...prev, { userId: 'guest_albert@example_com', userName: 'Albert', photo: '', email: 'albert@example.com', placeholderFor: 'albert@example.com', confirmed: true, prepaid_weekly: true }]);
     setPowerScores({ [currentWeek]: Object.fromEntries(names.map((_, i) => [uid(i), 22 - i * 2])) });
     setWeekScores({ 101: Object.fromEntries(names.map((_, i) => [uid(i), 12 - i])), 102: Object.fromEntries(names.map((_, i) => [uid(i), 11 - i])) });
     setGuestList(['albert@example.com', 'ozzy@example.com', 'art@example.com', 'roman@example.com']);
@@ -840,7 +848,7 @@ function App() {
 
   // Roster management: works even for members who haven't logged in yet (placeholder docs)
   const findRealPlayerByEmail = (email) => leaders.find(l => !String(l.userId).startsWith('guest_') && (l.email || '').toLowerCase() === email.toLowerCase());
-  const findPlaceholderByEmail = (email) => leaders.find(l => l.userId === `guest_${sanitizeEmail(email.toLowerCase())}`);
+  const findPlaceholderByEmail = (email) => leadersRaw.find(l => l.userId === `guest_${sanitizeEmail(email.toLowerCase())}`);
   const toggleRosterConfirm = async (email) => {
     const target = findRealPlayerByEmail(email) || findPlaceholderByEmail(email);
     try {
@@ -882,19 +890,39 @@ function App() {
     try { await deleteDoc(doc(db, PICKS_COLLECTION, ph.userId)); }
     catch (e) { console.error(e); alert("Error: " + e.message); }
   };
+  // Carry roster/payment flags from a placeholder onto the real account (real's own values win), then drop the placeholder
+  const ROSTER_FLAG_KEYS = ['confirmed', 'prepaid_weekly', 'season_paid', 'survivor_paid', 'survivor_optIn',
+    ...Array.from({ length: 18 }, (_, i) => `paid_week${i + 1}`)];
+  const mergePlaceholderInto = async (ph, real) => {
+    const flags = {};
+    ROSTER_FLAG_KEYS.forEach(k => { if (ph[k] !== undefined && real[k] === undefined) flags[k] = ph[k]; });
+    if (Object.keys(flags).length) await updateDoc(doc(db, PICKS_COLLECTION, real.userId), flags);
+    await deleteDoc(doc(db, PICKS_COLLECTION, ph.userId));
+  };
   const mergePlaceholder = async (email) => {
     const ph = findPlaceholderByEmail(email);
     const real = findRealPlayerByEmail(email);
     if (!ph || !real) return;
     if (!window.confirm(`Move ${getDisplayName(real)}'s roster flags from the placeholder onto their real account and remove the placeholder?`)) return;
-    const flags = {};
-    ['confirmed', 'prepaid_weekly', 'season_paid', 'survivor_paid', 'survivor_optIn',
-     ...Array.from({ length: 18 }, (_, i) => `paid_week${i + 1}`)].forEach(k => { if (ph[k] !== undefined) flags[k] = ph[k]; });
-    try {
-      await updateDoc(doc(db, PICKS_COLLECTION, real.userId), flags);
-      await deleteDoc(doc(db, PICKS_COLLECTION, ph.userId));
-    } catch (e) { console.error(e); alert("Error: " + e.message); }
+    try { await mergePlaceholderInto(ph, real); }
+    catch (e) { console.error(e); alert("Error: " + e.message); }
   };
+
+  // 🤝 Auto-merge: when an admin is online and a roster spot's person has signed in, merge silently
+  const autoMergedRef = useRef(new Set());
+  useEffect(() => {
+    if (!isAdmin || PREVIEW) return;
+    const isPh = (l) => String(l.userId).startsWith('guest_');
+    leadersRaw.filter(l => isPh(l) && l.placeholderFor).forEach(ph => {
+      const email = String(ph.placeholderFor).toLowerCase();
+      if (autoMergedRef.current.has(email)) return;
+      const real = leadersRaw.find(l => !isPh(l) && (l.email || '').toLowerCase() === email);
+      if (!real) return;
+      autoMergedRef.current.add(email); // once per session, even if it fails — no retry storms
+      mergePlaceholderInto(ph, real).catch(e => console.error("Auto-merge failed for " + email, e));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadersRaw, isAdmin]);
   const resetSurvivorPick = async (userId) => {
     if (!window.confirm(`Clear this player's Week ${currentWeek} survivor pick?`)) return;
     try {
