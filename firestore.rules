@@ -55,12 +55,14 @@ service cloud.firestore {
 
     // Survivor picks lock at their team's kickoff. The app stores that kickoff as
     // survivor_week<N>_lockAt; once it passes, non-admins can't change the pick.
-    // A new/changed pick must carry a kickoff in the next 8 days — which also blocks
-    // picking a game that already started and faking a far-future lock time.
+    // A new/changed pick must carry a kickoff that is still in the future — which
+    // blocks picking a game that already started. The upper bound only has to stop a
+    // lock parked past the season: players can pick weeks ahead from the week menu,
+    // so it spans the whole schedule rather than the next few days.
     function svKickoffOk(lockKey) {
       return lockKey in request.resource.data &&
              request.resource.data[lockKey] > request.time &&
-             request.resource.data[lockKey] <= request.time + duration.value(8, 'd');
+             request.resource.data[lockKey] <= request.time + duration.value(200, 'd');
     }
     function svUpdateOk(ch, w) {
       let key = 'survivor_week' + w;

@@ -766,6 +766,11 @@ function App() {
   };
 
   // --- SURVIVOR ACTIONS ---
+  // A rules denial arrives as a bare "Missing or insufficient permissions", which tells
+  // a player nothing. Name the two guards that can actually trip here.
+  const survivorError = (e) => e?.code === 'permission-denied'
+    ? "Couldn't save that — either that team's game already kicked off, or your email isn't on the league roster yet. Ask an admin to check the roster."
+    : 'Error: ' + e.message;
   const joinSurvivor = async () => {
     if (!user) return;
     if (!window.confirm(`Join the Survivor Pool? One-time $${SURVIVOR_FEE} entry (pay on Venmo).\n\nPick ONE team each week — win and you survive, lose and you're out. Each team can only be used once all season.`)) return;
@@ -774,7 +779,7 @@ function App() {
         userId: user.uid, userName: user.displayName, photo: user.photoURL, email: user.email,
         survivor_optIn: true
       }, { merge: true });
-    } catch (e) { console.error(e); alert("Error: " + e.message); }
+    } catch (e) { console.error(e); alert(survivorError(e)); }
   };
   const pickSurvivorTeam = async (game, abbr) => {
     if (!user) return;
@@ -797,7 +802,7 @@ function App() {
         [`survivor_week${currentWeek}_pickedAt`]: serverTimestamp(),
         [`survivor_week${currentWeek}_lockAt`]: new Date(game.date) // server-side lock: rules refuse changes after kickoff
       }, { merge: true });
-    } catch (e) { console.error(e); alert("Error: " + e.message); }
+    } catch (e) { console.error(e); alert(survivorError(e)); }
   };
 
   // --- ADMIN ACTIONS ---
