@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, db, auth } from './firebase';
+import { getGameSlot, analyzeWeek } from './recap';
 import { doc, setDoc, collection, updateDoc, deleteField, deleteDoc, getDoc, getDocs, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -47,6 +48,13 @@ const FUNNY_SOUND_FILES = ['/funny.mp3', '/ack.mp3', '/huh.mp3', '/fart.mp3', '/
 
 const isAdminEmail = (email) => !!email && ADMIN_EMAILS.some(e => e.toLowerCase() === email.toLowerCase());
 const sanitizeEmail = (email) => email ? email.replace(/\./g, '_') : "";
+
+// 🕐 Broadcast window badge: TNF / Sun AM / Sun PM / SNF / MNF
+const SlotChip = ({ game, block = false }) => {
+  const slot = getGameSlot(game);
+  if (!slot) return null;
+  return <span className={`slot-chip slot-${slot.key}`} style={block ? { display: 'inline-block', marginBottom: '4px' } : { marginRight: '8px' }}>{slot.label}</span>;
+};
 
 const Avatar = ({ src, name, size = 38 }) => src
   ? <img src={src} alt="" referrerPolicy="no-referrer" className="avatar" style={{ width: size, height: size }} />
@@ -124,6 +132,7 @@ function App() {
   const standingRowRefs = useRef(new Map());      // 🏁 FLIP rank-swap animation on the standings
   const prevRowTopsRef = useRef(new Map());
 
+  const lineCacheRef = useRef({}); // gameId -> pre-game line, kept after ESPN's scoreboard drops it
   const legacyPhonesRef = useRef(null); // phones found in config/settings (pre-migration)
   const fetchedWeeksRef = useRef(new Set()); // past weeks already fetched for Survivor results
 
@@ -398,9 +407,25 @@ function App() {
         const processedGames = (gamesData.events || []).map(g => {
             const winner = g.competitions[0].competitors.find(c => c.winner === true)?.team.abbreviation;
             const odds = g.competitions[0].odds && g.competitions[0].odds[0] ? g.competitions[0].odds[0].details : "";
-            return { ...g, winner, oddsString: odds };
-        });
+            // Pin the line at kickoff so in-game line moves don't shift the breakdown.
+            const pre = g.status?.type?.state === 'pre';
+            if (odds && pre) lineCacheRef.current[g.id] = odds;
+            return { ...g, winner, oddsString: odds, pregameLine: (pre ? odds : lineCacheRef.current[g.id]) || odds || "" };
+        }).sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0)); // kickoff order: TNF → Sunday → MNF
         setGames(processedGames);
+
+        // The scoreboard drops a game's line once it ends, but the per-game summary
+        // keeps it. The breakdown snapshots need it to price games as of Sunday.
+        const missing = processedGames.filter(g => !g.pregameLine && !(g.id in lineCacheRef.current));
+        if (missing.length) {
+          await Promise.all(missing.map(async g => {
+            try {
+              const d = await (await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${g.id}`)).json();
+              lineCacheRef.current[g.id] = d.pickcenter?.[0]?.details || "";
+            } catch { /* try again on the next poll */ }
+          }));
+          setGames(gs => gs.map(g => g.pregameLine ? g : { ...g, pregameLine: lineCacheRef.current[g.id] || "" }));
+        }
 
         const newsRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/news');
         const newsData = await newsRes.json();
@@ -568,6 +593,13 @@ function App() {
   // with the rest of the line over the time remaining.
   const NFL_SIGMA = 13.5;
   const normCdf = (x) => 1 / (1 + Math.exp(-1.702 * x)); // logistic approx of Φ
+  // Points abbr is favored by (negative = underdog); 0 when there's no line.
+  const getLineFor = (game, abbr, line = game.oddsString) => {
+    const match = (line || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/);
+    return match ? (match[1] === abbr ? parseFloat(match[2]) : -parseFloat(match[2])) : 0;
+  };
+  // Pre-game chance from the line alone — pregameLine survives the game ending.
+  const getPregameWinProb = (game, abbr) => normCdf(getLineFor(game, abbr, game.pregameLine || game.oddsString) / NFL_SIGMA);
   const getTeamWinProb = (game, abbr) => {
     const state = game.status?.type?.state;
     if (state === 'post') {
@@ -578,8 +610,7 @@ function App() {
     const me = comp.find(c => c.team.abbreviation === abbr);
     const opp = comp.find(c => c.team.abbreviation !== abbr);
     if (!me || !opp) return 0.5;
-    const match = (game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/);
-    const spread = match ? (match[1] === abbr ? parseFloat(match[2]) : -parseFloat(match[2])) : 0;
+    const spread = getLineFor(game, abbr);
     if (state !== 'in') return normCdf(spread / NFL_SIGMA);
     const margin = (parseInt(me.score, 10) || 0) - (parseInt(opp.score, 10) || 0);
     const period = game.status?.period || 1;
@@ -678,6 +709,18 @@ function App() {
     return Object.fromEntries(players.map((p, i) => [p.userId, wins[i] / N]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [games, leaders, currentWeek]);
+
+  // 📣 How-to-win breakdown. Keyed on final results and lines only, so the 60s score
+  // poll doesn't recompute it — it refreshes when a game goes final.
+  const finalsKey = games.map(g => `${g.id}:${g.status?.type?.state === 'post' ? (g.winner || 'tie') : ''}:${g.pregameLine || ''}`).join('|');
+  const weekBreakdown = useMemo(() => {
+    if (!games.length || !leaders.length) return null;
+    const players = leaders
+      .filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0)
+      .map(l => ({ userId: l.userId, name: getDisplayName(l), picks: l[`week${currentWeek}`] }));
+    return analyzeWeek({ games, players, pregameProb: getPregameWinProb });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalsKey, leaders, currentWeek]);
 
   // --- ACTIONS ---
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
@@ -1073,7 +1116,7 @@ function App() {
           return (
             <div key={game.id} className={`game-card ${locked ? 'locked' : ''}`} style={{ animationDelay: `${Math.min(i * 40, 400)}ms` }}>
               <div className="game-card-top">
-                <span>{isGameLocked(game) && !adminMode ? '🔒 ' : ''}{game.status.type.shortDetail}</span>
+                <span>{isGameLocked(game) && !adminMode ? '🔒 ' : ''}<SlotChip game={game} />{game.status.type.shortDetail}</span>
                 <span className="odds">{odds}</span>
               </div>
               <div className="game-card-teams">
@@ -1364,7 +1407,7 @@ function App() {
                       {games.map(g => {
                         const away = g.competitions[0].competitors.find(c => c.homeAway === 'away')?.team.abbreviation;
                         const home = g.competitions[0].competitors.find(c => c.homeAway === 'home')?.team.abbreviation;
-                        return <th key={g.id}><div>{away}</div><div style={{ color: 'var(--muted)', fontWeight: 600 }}>@{home}</div></th>;
+                        return <th key={g.id}><SlotChip game={g} block /><div>{away}</div><div style={{ color: 'var(--muted)', fontWeight: 600 }}>@{home}</div></th>;
                       })}
                       <th>Tie</th><th>Correct</th><th style={{ color: 'var(--blue)' }}>⚡Pwr</th><th style={{ color: 'var(--gold)' }}>Proj</th><th style={{ color: 'var(--accent)' }}>Win %</th>
                     </tr></thead>
@@ -1409,6 +1452,28 @@ function App() {
                     </tbody>
                   </table>
                 </div>
+                {weekBreakdown && (() => {
+                  const fmt = (x) => x > 0.995 ? '99%' : x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`;
+                  return (
+                    <div className="glass recap-card">
+                      <span className="section-label" style={{ margin: 0 }}>📣 How to Win Week {currentWeek}</span>
+                      <div className="recap-headline">{weekBreakdown.headline}</div>
+                      {weekBreakdown.pending > 0 && (
+                        <div className="recap-out">Win paths show up once {weekBreakdown.pending} more game{weekBreakdown.pending === 1 ? '' : 's'} {weekBreakdown.pending === 1 ? 'finishes' : 'finish'} — usually a few early games into Sunday.</div>
+                      )}
+                      {weekBreakdown.lines.map(l => (
+                        <div key={l.userId} className="recap-line">
+                          <span className="recap-pct">{fmt(l.pct)}</span>
+                          <div><b>{l.name}</b> — {l.text}</div>
+                        </div>
+                      ))}
+                      {weekBreakdown.out.length > 0 && (
+                        <div className="recap-out">❌ Out: {weekBreakdown.out.join(', ')} — can't reach the top even if every pick hits.</div>
+                      )}
+                      <div className="recap-foot">Updates each time a game goes final. Odds use each game's pre-game line; ties split the win. The Win % column above moves live during games.</div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
