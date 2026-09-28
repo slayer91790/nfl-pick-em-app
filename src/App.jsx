@@ -527,7 +527,9 @@ function App() {
   // Win with a favorite = 1 pt · underdog by less than 7 = 2 pts · 7+ point underdog = 3 pts.
   const getPickPointValue = (game, pick) => {
     if (!pick) return 0;
-    const match = (game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/); // ESPN details, e.g. "KC -7.5"
+    // pregameLine, not oddsString: ESPN drops the line once a game ends, which used to
+    // turn every finished underdog hit into a 1-pointer.
+    const match = (game.pregameLine || game.oddsString || "").match(/([A-Z]{2,3})\s*-(\d+\.?\d*)/); // ESPN details, e.g. "KC -7.5"
     if (!match) return 1; // pick'em or no line posted
     const [, favTeam, numStr] = match;
     if (pick === favTeam) return 1;
