@@ -723,6 +723,74 @@ function App() {
     return analyzeWeek({ games, players, pregameProb: getPregameWinProb });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalsKey, leaders, currentWeek]);
+  // Win paths name results in unplayed games, which gives away picks. Everyone can see
+  // them once picks are revealed or every game has kicked off.
+  const pathsPublic = picksVisible || (games.length > 0 && games.every(g => isGameLocked(g)));
+
+  // 🎙️ THE BOOTH — Claude roasts the week after each final. The facts below are the
+  // same for every viewer (nothing viewer-specific, nothing still hidden), so the
+  // server writes one roast per state and everyone shares it.
+  const boothFacts = useMemo(() => {
+    const finals = games.filter(g => g.status?.type?.state === 'post');
+    const players = leaders.filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0)
+      .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
+    if (!finals.length || !players.length) return null;
+    const pickOf = (p, g) => p[`week${currentWeek}`][g.id];
+    const results = finals.map(g => {
+      const comp = g.competitions[0].competitors;
+      const away = comp.find(c => c.homeAway === 'away'), home = comp.find(c => c.homeAway === 'home');
+      const line = g.pregameLine || '';
+      return {
+        game: `${away.team.abbreviation} @ ${home.team.abbreviation}`,
+        when: getGameSlot(g)?.label || '',
+        final: `${away.team.abbreviation} ${away.score}, ${home.team.abbreviation} ${home.score}`,
+        line: line || 'no line',
+        underdogWon: !!(g.winner && line && getLineFor(g, g.winner, line) < 0),
+        gotItRight: players.filter(p => g.winner && pickOf(p, g) === g.winner).map(getDisplayName),
+        gotItWrong: players.filter(p => pickOf(p, g) && pickOf(p, g) !== g.winner).map(getDisplayName),
+      };
+    });
+    const facts = {
+      results,
+      standings: players.map(p => ({ name: getDisplayName(p), correct: getCorrectCountForPlayer(p) }))
+        .sort((a, b) => b.correct - a.correct || a.name.localeCompare(b.name)),
+      gamesLeft: games.length - finals.length,
+      pot: `$${getCurrentPot()}`,
+      unpaid: players.filter(p => !isWeekPaid(p, currentWeek)).map(getDisplayName),
+    };
+    if (weekBreakdown?.lines.length) {
+      facts.winOdds = weekBreakdown.lines.map(l => ({ name: l.name, chance: `${Math.round(l.pct * 100)}%`, ...(pathsPublic ? { path: l.text } : { standing: l.standing }) }));
+      facts.eliminated = weekBreakdown.out;
+      if (!pathsPublic) facts.note = 'Picks for unplayed games are still hidden — no win paths yet.';
+    }
+    return facts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalsKey, leaders, currentWeek, weekBreakdown, pathsPublic]);
+  const boothFactsKey = boothFacts ? JSON.stringify(boothFacts) : '';
+  const [booth, setBooth] = useState(null); // { lines, at, pending? }
+  useEffect(() => { setBooth(null); }, [currentWeek]);
+  useEffect(() => {
+    if (!boothFactsKey || !user || PREVIEW) return;
+    let stopped = false, timer;
+    const ask = async (attempt) => {
+      try {
+        const token = await auth.currentUser.getIdToken();
+        const res = await fetch('/api/booth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ season: SEASON, week: currentWeek, facts: JSON.parse(boothFactsKey) }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (stopped) return;
+        if (data.lines?.length) setBooth(data); // keeps the last roast up while the next one is written
+        if (data.pending && attempt < 12) timer = setTimeout(() => ask(attempt + 1), 5000);
+      } catch (e) { console.warn('booth', e); }
+    };
+    timer = setTimeout(() => ask(0), 1500); // let a burst of finals settle first
+    return () => { stopped = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boothFactsKey, user]);
 
   // --- ACTIONS ---
   const handleLogin = async () => { try { await signInWithGoogle(); } catch (e) { console.error(e); } };
@@ -1454,8 +1522,16 @@ function App() {
                     </tbody>
                   </table>
                 </div>
+                {booth?.lines?.length > 0 && (
+                  <div className="glass recap-card booth-card">
+                    <span className="section-label" style={{ margin: 0 }}>🎙️ The Booth</span>
+                    {booth.lines.map((line, i) => <div key={i} className="booth-line">{line}</div>)}
+                    <div className="recap-foot">Written by Claude after each final{booth.pending ? ' · new take incoming…' : ''}. All in fun — mostly.</div>
+                  </div>
+                )}
                 {weekBreakdown && (() => {
                   const fmt = (x) => x > 0.995 ? '99%' : x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`;
+                  const showPaths = pathsPublic || isAdmin;
                   return (
                     <div className="glass recap-card">
                       <span className="section-label" style={{ margin: 0 }}>📣 How to Win Week {currentWeek}</span>
@@ -1466,9 +1542,12 @@ function App() {
                       {weekBreakdown.lines.map(l => (
                         <div key={l.userId} className="recap-line">
                           <span className="recap-pct">{fmt(l.pct)}</span>
-                          <div><b>{l.name}</b> — {l.text}</div>
+                          <div><b>{l.name}</b> — {showPaths ? l.text : l.standing}</div>
                         </div>
                       ))}
+                      {!showPaths && weekBreakdown.lines.length > 0 && (
+                        <div className="recap-out">🔒 Win paths unlock when picks are revealed — they'd give away picks for games that haven't kicked off.</div>
+                      )}
                       {weekBreakdown.out.length > 0 && (
                         <div className="recap-out">❌ Out: {weekBreakdown.out.join(', ')} — can't reach the top even if every pick hits.</div>
                       )}

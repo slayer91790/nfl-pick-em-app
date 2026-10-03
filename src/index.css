@@ -672,3 +672,7 @@ button { font-family: var(--font-body); }
 .recap-pct { min-width: 44px; text-align: right; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
 .recap-out { font-size: 12px; color: var(--muted); }
 .recap-foot { font-size: 11px; color: var(--muted); opacity: 0.75; }
+
+/* ---------- The Booth (Claude's running commentary) ---------- */
+.booth-card { border-color: rgba(255, 201, 77, 0.28); }
+.booth-line { font-size: 14px; line-height: 1.55; padding-left: 12px; border-left: 2px solid var(--gold-dim); }

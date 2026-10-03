@@ -174,8 +174,10 @@ export const analyzeWeek = ({ games, players, pregameProb }) => {
         if (twins.length) parts.push(`Same picks as ${listJoin(twins.map(k => players[k].name))} the rest of the way.`);
       }
     }
-    const text = `${standing[0].toUpperCase()}${standing.slice(1)}. ${parts.join(' ')}`;
-    return { userId: p.userId, name: p.name, pct: pWin[i], text };
+    const Standing = `${standing[0].toUpperCase()}${standing.slice(1)}.`;
+    // standing is safe to show any time; text names results in unplayed games, which
+    // gives away picks until they're revealed.
+    return { userId: p.userId, name: p.name, pct: pWin[i], standing: Standing, text: `${Standing} ${parts.join(' ')}` };
   }).filter(Boolean).sort((a, b) => b.pct - a.pct);
 
   const out = players.filter((_, i) => !alive[i]).map(p => p.name);
