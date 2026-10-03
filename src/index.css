@@ -676,3 +676,4 @@ button { font-family: var(--font-body); }
 /* ---------- The Booth (Claude's running commentary) ---------- */
 .booth-card { border-color: rgba(255, 201, 77, 0.28); }
 .booth-line { font-size: 14px; line-height: 1.55; padding-left: 12px; border-left: 2px solid var(--gold-dim); }
+.booth-divider { border-top: 1px solid var(--card-border); padding-top: 12px; margin-top: 4px; }

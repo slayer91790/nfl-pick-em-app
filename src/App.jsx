@@ -1522,19 +1522,22 @@ function App() {
                     </tbody>
                   </table>
                 </div>
-                {booth?.lines?.length > 0 && (
-                  <div className="glass recap-card booth-card">
-                    <span className="section-label" style={{ margin: 0 }}>🎙️ The Booth</span>
-                    {booth.lines.map((line, i) => <div key={i} className="booth-line">{line}</div>)}
-                    <div className="recap-foot">Written by Claude after each final{booth.pending ? ' · new take incoming…' : ''}. All in fun — mostly.</div>
-                  </div>
-                )}
-                {weekBreakdown && (() => {
+                {/* 🎙️ THE BOOTH: Claude's roast on top, the exact odds and win paths under it */}
+                {(booth?.lines?.length > 0 || weekBreakdown) && (() => {
                   const fmt = (x) => x > 0.995 ? '99%' : x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`;
                   const showPaths = pathsPublic || isAdmin;
+                  const hasRoast = booth?.lines?.length > 0;
                   return (
-                    <div className="glass recap-card">
-                      <span className="section-label" style={{ margin: 0 }}>📣 How to Win Week {currentWeek}</span>
+                    <div className="glass recap-card booth-card">
+                      <span className="section-label" style={{ margin: 0 }}>🎙️ The Booth · Week {currentWeek}</span>
+                      {hasRoast && booth.lines.map((line, i) => <div key={i} className="booth-line">{line}</div>)}
+                      {hasRoast && (
+                        <div className="recap-foot">Written by Claude after each final{booth.pending ? ' · new take incoming…' : ''}. All in fun — mostly.</div>
+                      )}
+                      {weekBreakdown && <>
+                      <div className={hasRoast ? 'booth-divider' : undefined}>
+                        <span className="section-label" style={{ margin: 0 }}>📣 How to Win</span>
+                      </div>
                       <div className="recap-headline">{weekBreakdown.headline}</div>
                       {weekBreakdown.pending > 0 && (
                         <div className="recap-out">Win paths show up once {weekBreakdown.pending} more game{weekBreakdown.pending === 1 ? '' : 's'} {weekBreakdown.pending === 1 ? 'finishes' : 'finish'} — usually a few early games into Sunday.</div>
@@ -1552,6 +1555,7 @@ function App() {
                         <div className="recap-out">❌ Out: {weekBreakdown.out.join(', ')} — can't reach the top even if every pick hits.</div>
                       )}
                       <div className="recap-foot">Updates each time a game goes final. Odds use each game's pre-game line; ties split the win. The Win % column above moves live during games.</div>
+                      </>}
                     </div>
                   );
                 })()}
