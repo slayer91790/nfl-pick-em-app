@@ -30,7 +30,11 @@ export default async (req: Request, _context: Context) => {
 
     const text = msg.content.map(b => (b.type === "text" ? b.text : "")).join("\n");
     const lines = text.split("\n")
-      .map(s => s.replace(/^(?:[-*•]|\d+[.)])\s+/, "").trim())
+      .map(s => s.replace(/^(?:[-*•]|\d+[.)])\s+/, "")
+        // Markdown bold/italic shows up as literal asterisks in the card. Only strips
+        // whole-word wrappers, so a censored "f**k" (if one slips through) isn't mangled.
+        .replace(/(^|[\s"'(])(\*{1,2}|_{1,2})(\S(?:.*?\S)?)\2(?=$|[\s"'),.!?;:])/g, "$1$3")
+        .trim())
       .filter(Boolean)
       .slice(0, 6);
     if (!lines.length) return;
