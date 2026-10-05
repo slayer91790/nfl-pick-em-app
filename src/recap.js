@@ -42,7 +42,49 @@ const teamsOf = (g) => {
 
 const listJoin = (xs) => xs.length <= 1 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
-// players: [{ userId, name, picks: { [gameId]: abbr } }]
+// 🎯 TIEBREAKER — closest guess to the last MNF game's combined score wins, over or
+// under doesn't matter (31 beats 42 on a 35 total: 4 off vs 7 off). Equal distance
+// stays a tie. Returns which totals each guess takes, lowest first:
+// [{ names, tb, lo, hi }] (hi null = and up) plus any dead-heat totals.
+// entries: [{ name, tb }] — tb as typed; blanks can't win a tiebreak.
+export const tiebreakRanges = (entries) => {
+  const byTb = new Map();
+  const missing = [];
+  entries.forEach(e => {
+    const tb = parseInt(e.tb, 10);
+    if (isNaN(tb)) missing.push(e.name);
+    else byTb.set(tb, [...(byTb.get(tb) || []), e.name]);
+  });
+  const vals = [...byTb.keys()].sort((a, b) => a - b);
+  const ranges = vals.map((tb, i) => ({
+    names: byTb.get(tb),
+    tb,
+    lo: i === 0 ? 0 : Math.floor((vals[i - 1] + tb) / 2) + 1,
+    hi: i === vals.length - 1 ? null : Math.ceil((tb + vals[i + 1]) / 2) - 1,
+  }));
+  // Guesses an even distance apart leave one total smack in the middle: still tied.
+  const deadHeats = vals.slice(1)
+    .map((tb, i) => ({ total: (vals[i] + tb) / 2, names: [...byTb.get(vals[i]), ...byTb.get(tb)] }))
+    .filter(d => Number.isInteger(d.total));
+  return { ranges, deadHeats, missing };
+};
+
+export const rangeLabel = ({ lo, hi }) => hi === null ? `${lo} or more` : lo === 0 ? `${hi} or less` : lo === hi ? `exactly ${lo}` : `${lo}–${hi}`;
+
+// "Ana (31) wins on a total of 36 or less, Bob (42) on 37 or more; exactly 37 stays tied."
+export const tiebreakText = ({ ranges, deadHeats, missing }) => {
+  if (!ranges.length) return 'Nobody entered a tiebreaker — it stays a tie.';
+  const who = (r) => `${listJoin(r.names)} (${r.tb})`;
+  const parts = ranges.length === 1
+    ? [`${who(ranges[0])} ${ranges[0].names.length > 1 ? 'share the same number — still tied whatever the total' : 'is the only one with a tiebreaker in — wins it'}`]
+    : ranges.map((r, i) => `${who(r)} ${i === 0 ? 'wins on a total of ' : 'on '}${rangeLabel(r)}${r.names.length > 1 ? ' (still tied with each other)' : ''}`);
+  let text = `${parts.join(', ')}.`;
+  if (deadHeats.length) text += ` A total of exactly ${listJoin(deadHeats.map(d => String(d.total))).replace(/ and (?=\d+$)/, ' or ')} lands dead even — still tied.`;
+  if (missing.length) text += ` ${listJoin(missing)} never entered one, so can't win a tiebreak.`;
+  return text;
+};
+
+// players: [{ userId, name, picks: { [gameId]: abbr }, tb? }]
 // pregameProb(game, abbr): chance abbr wins, from the line alone
 // Final games are settled; the rest — games in progress included — are priced off
 // their pre-game line, so the breakdown only changes when a game goes final.
@@ -61,7 +103,7 @@ export const analyzeWeek = ({ games, players, pregameProb }) => {
   const headline = n === 0
     ? 'Every game is final.'
     : `${n} game${n === 1 ? '' : 's'} left (${listJoin([...new Set(openInfo.map(o => o.slot?.label).filter(Boolean))])}).`;
-  if (n > MAX_OPEN) return { headline, lines: [], out: [], pending: n - MAX_OPEN };
+  if (n > MAX_OPEN) return { headline, lines: [], out: [], ties: [], pending: n - MAX_OPEN };
 
   // Enumerate every way the open games can go. Bit j set = away team wins game j.
   const scen = [];
@@ -99,6 +141,29 @@ export const analyzeWeek = ({ games, players, pregameProb }) => {
   const hits = (i, j, s) => pickOf(i, j) === (((s.mask >> j) & 1) ? openInfo[j].away : openInfo[j].home);
   const pctText = (x) => x > 0.995 ? '99%' : x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`;
   const soleWin = (s, i) => s.top.length === 1 && s.top[0] === i;
+
+  // 🎯 Every way the week can end tied at the top — who ties, what has to happen, and
+  // which MNF totals break it for whom. Likeliest first.
+  const tieGroups = new Map();
+  scen.filter(s => s.top.length > 1).forEach(s => {
+    const key = s.top.join(',');
+    const g = tieGroups.get(key) || { key, top: s.top, prob: 0, list: [] };
+    g.prob += s.prob;
+    g.list.push(s);
+    tieGroups.set(key, g);
+  });
+  const ties = [...tieGroups.values()].sort((a, b) => b.prob - a.prob).slice(0, 4).map(g => {
+    const bit = (j) => (g.list[0].mask >> j) & 1;
+    const fixed = relevant.filter(j => g.list.every(s => ((s.mask >> j) & 1) === bit(j)));
+    // Do those results alone guarantee this tie, or do other games also have to fall right?
+    const sure = scen.filter(s => fixed.every(j => ((s.mask >> j) & 1) === bit(j))).every(s => s.top.join(',') === g.key);
+    const when = n === 0 ? 'As it stands'
+      : !fixed.length && sure ? 'Whatever happens'
+      : fixed.length && fixed.length <= 3 ? `${sure ? 'If' : 'Possible if'} ${listJoin(describe(g.list[0].mask, fixed))}`
+      : null;
+    const tb = tiebreakRanges(g.top.map(i => ({ name: players[i].name, tb: players[i].tb })));
+    return { names: g.top.map(i => players[i].name), pct: g.prob, when, ...tb, text: tiebreakText(tb) };
+  });
 
   const lines = players.map((p, i) => {
     if (!alive[i]) return null;
@@ -181,5 +246,5 @@ export const analyzeWeek = ({ games, players, pregameProb }) => {
   }).filter(Boolean).sort((a, b) => b.pct - a.pct);
 
   const out = players.filter((_, i) => !alive[i]).map(p => p.name);
-  return { headline, lines, out };
+  return { headline, lines, out, ties };
 };

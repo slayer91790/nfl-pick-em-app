@@ -677,3 +677,8 @@ button { font-family: var(--font-body); }
 .booth-card { border-color: rgba(255, 201, 77, 0.28); }
 .booth-line { font-size: 14px; line-height: 1.55; padding-left: 12px; border-left: 2px solid var(--gold-dim); }
 .booth-divider { border-top: 1px solid var(--card-border); padding-top: 12px; margin-top: 4px; }
+.tb-scenario { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.tb-ranges { display: flex; flex-wrap: wrap; gap: 6px; }
+.tb-chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--card-border); background: rgba(255,255,255,0.03); }
+.tb-here { border-color: var(--accent); color: var(--accent); }
+.tb-gone { opacity: 0.4; text-decoration: line-through; }

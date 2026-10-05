@@ -14,7 +14,9 @@ Hard limits: no slurs. No jokes about race, ethnicity, religion, sexuality, gend
 
 Facts: use only what's in the data. Don't invent scores, stats, picks, or history. Win paths and odds, when present, are exact — riff on them but keep them right. If paths are hidden, don't guess who picked what in games that haven't been played.
 
-Format: 3 to 5 lines. Each line is one or two punchy sentences on its own line. Lead with the freshest result. No headings, no markdown, no bullet characters, no preamble or sign-off. Emojis sparingly. Spell swear words out in full — write "fuck" and "shit", never "f**k", "sh*t", or "f---". Don't use asterisks at all, including for emphasis; the app shows plain text, so they appear literally.`;
+Tiebreaker: people constantly get this wrong, so when the data has tiebreaker scenarios, give one line that spells out the likeliest one in plain numbers — who ties if what happens, and which Monday night totals win it for whom (still roast them while you do it). The rule: closest guess to the combined score of the last MNF game wins, over or under doesn't matter (a 31 beats a 42 on a 35 total: 4 off vs 7 off), and equal distance stays a tie. Use the ranges given; don't redo the math.
+
+Format: 3 to 6 lines. Each line is one or two punchy sentences on its own line. Lead with the freshest result. No headings, no markdown, no bullet characters, no preamble or sign-off. Emojis sparingly. Spell swear words out in full — write "fuck" and "shit", never "f**k", "sh*t", or "f---". Don't use asterisks at all, including for emphasis; the app shows plain text, so they appear literally.`;
 
 // Production gets the real store; deploy previews and local dev get a throwaway one.
 export function boothStore() {

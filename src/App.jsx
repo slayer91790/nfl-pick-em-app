@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, db, auth } from './firebase';
-import { getGameSlot, analyzeWeek } from './recap';
+import { getGameSlot, analyzeWeek, rangeLabel } from './recap';
 import { doc, setDoc, collection, updateDoc, deleteField, deleteDoc, getDoc, getDocs, arrayUnion, arrayRemove, writeBatch, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -719,7 +719,7 @@ function App() {
     if (!games.length || !leaders.length) return null;
     const players = leaders
       .filter(l => l[`week${currentWeek}`] && Object.keys(l[`week${currentWeek}`]).length > 0)
-      .map(l => ({ userId: l.userId, name: getDisplayName(l), picks: l[`week${currentWeek}`] }));
+      .map(l => ({ userId: l.userId, name: getDisplayName(l), picks: l[`week${currentWeek}`], tb: getTiebreakerFor(l, currentWeek) }));
     return analyzeWeek({ games, players, pregameProb: getPregameWinProb });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalsKey, leaders, currentWeek]);
@@ -762,6 +762,13 @@ function App() {
       facts.winOdds = weekBreakdown.lines.map(l => ({ name: l.name, chance: `${Math.round(l.pct * 100)}%`, ...(pathsPublic ? { path: l.text } : { standing: l.standing }) }));
       facts.eliminated = weekBreakdown.out;
       if (!pathsPublic) facts.note = 'Picks for unplayed games are still hidden — no win paths yet.';
+      // Tie scenarios name who ties and how, so they wait for the same reveal as the paths.
+      if (pathsPublic && weekBreakdown.ties.length) {
+        facts.tiebreaker = {
+          rule: "Ties at the top go to whoever guessed closest to the last MNF game's combined score. Over or under doesn't matter, only distance. Equal distance stays a tie.",
+          scenarios: weekBreakdown.ties.map(t => ({ when: t.when || 'in some outcomes', chance: `${Math.round(t.pct * 100)}%`, tied: t.names, breaks: t.text })),
+        };
+      }
     }
     return facts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1527,6 +1534,13 @@ function App() {
                   const fmt = (x) => x > 0.995 ? '99%' : x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`;
                   const showPaths = pathsPublic || isAdmin;
                   const hasRoast = booth?.lines?.length > 0;
+                  const andJoin = (xs) => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+                  // Live MNF total marks which tiebreak ranges are already dead and who's in front.
+                  const mnfGame = getMnfGame();
+                  const mnfState = mnfGame?.status?.type?.state;
+                  const mnfScores = (mnfGame?.competitions?.[0]?.competitors || []).map(c => parseInt(c.score, 10));
+                  const mnfNow = (mnfState === 'in' || mnfState === 'post') && mnfScores.length === 2 && !mnfScores.some(isNaN)
+                    ? mnfScores[0] + mnfScores[1] : null;
                   return (
                     <div className="glass recap-card booth-card">
                       <span className="section-label" style={{ margin: 0 }}>🎙️ The Booth · Week {currentWeek}</span>
@@ -1553,6 +1567,40 @@ function App() {
                       )}
                       {weekBreakdown.out.length > 0 && (
                         <div className="recap-out">❌ Out: {weekBreakdown.out.join(', ')} — can't reach the top even if every pick hits.</div>
+                      )}
+                      <div className="booth-divider">
+                        <span className="section-label" style={{ margin: 0 }}>🎯 If It Ends in a Tie</span>
+                      </div>
+                      <div className="recap-out">
+                        Closest guess to the last MNF game's combined score wins — over or under doesn't matter, only how far off.
+                        Say you have 31 and they have 42: a 35 total puts you 4 off and them 7 off, so you win. Same distance = still tied.
+                      </div>
+                      {mnfNow !== null && weekBreakdown.ties.length > 0 && (
+                        <div className="recap-out" style={{ color: 'var(--gold)' }}>
+                          {mnfState === 'post' ? `MNF final total: ${mnfNow}.` : `MNF total right now: ${mnfNow} — it only goes up, so anything below that is gone.`}
+                        </div>
+                      )}
+                      {showPaths && weekBreakdown.ties.map(t => (
+                        <div key={t.names.join('|')} className="tb-scenario">
+                          <div><b>{t.when || 'In some outcomes'}</b>: {andJoin(t.names)} tie at the top{t.pct < 0.995 ? ` · ${fmt(t.pct)} chance` : ''}</div>
+                          <div className="tb-ranges">
+                            {t.ranges.map(r => {
+                              const gone = mnfNow !== null && r.hi !== null && mnfNow > r.hi;
+                              const here = mnfNow !== null && mnfNow >= r.lo && (r.hi === null || mnfNow <= r.hi);
+                              return (
+                                <span key={r.tb} className={`tb-chip${gone ? ' tb-gone' : here ? ' tb-here' : ''}`}>
+                                  <b>{r.names.join(' & ')}</b> ({r.tb}) wins on <b>{rangeLabel(r)}</b>{r.names.length > 1 ? ' — still tied' : ''}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          {t.ranges.length === 0 && <div className="recap-out">Nobody in this tie entered a tiebreaker — it stays a tie.</div>}
+                          {t.deadHeats.length > 0 && <div className="recap-out">A total of exactly {andJoin(t.deadHeats.map(d => String(d.total))).replace(/ and (?=\d+$)/, ' or ')} lands dead even — still tied.</div>}
+                          {t.missing.length > 0 && <div className="recap-out">{t.missing.join(', ')} never entered a tiebreaker, so can't win one.</div>}
+                        </div>
+                      ))}
+                      {!showPaths && weekBreakdown.lines.length > 0 && (
+                        <div className="recap-out">🔒 Tie scenarios show up with the win paths.</div>
                       )}
                       <div className="recap-foot">Updates each time a game goes final. Odds use each game's pre-game line; ties split the win. The Win % column above moves live during games.</div>
                       </>}
