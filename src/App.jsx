@@ -629,7 +629,8 @@ function App() {
       if (databaseWinners[currentWeek]) return { userName: databaseWinners[currentWeek], userId: 'db' };
 
       const scored = leaders.map(p => ({ p, correct: getCorrectCountForPlayer(p) }));
-      const remaining = games.filter(g => !g.winner).length;
+      // A tie is final with no winner — count by game state, or a tied week never ends
+      const remaining = games.filter(g => g.status?.type?.state !== 'post').length;
       const top = Math.max(...scored.map(s => s.correct));
       const contenders = scored.filter(s => s.correct === top);
 
@@ -1507,7 +1508,7 @@ function App() {
                               let cls = 'cell-hidden', label = '🔒';
                               if (showPick) {
                                 label = pick || '–';
-                                cls = !pick ? 'cell-hidden' : !g.winner ? 'cell-pending' : pick === g.winner ? 'cell-correct' : 'cell-wrong';
+                                cls = !pick ? 'cell-hidden' : g.winner ? (pick === g.winner ? 'cell-correct' : 'cell-wrong') : g.status?.type?.state === 'post' ? 'cell-wrong' : 'cell-pending';
                               }
                               return <td key={g.id}><span className={`cell-chip ${cls}`}>{label}</span></td>;
                             })}
